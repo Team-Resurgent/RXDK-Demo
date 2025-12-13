@@ -7,6 +7,8 @@ official Microsoft XDK.
 This project is intended for experimentation, prototyping, and learning within
 the RXDK environment.
 
+
+
 ## Features
 
 - RXDK-compatible Xbox executable
@@ -39,7 +41,7 @@ the RXDK environment.
 
 - RXDK toolchain
 - Compatible C++ compiler for RXDK
-- Standard RXDK libraries (`xtl`, `xgraphics`, `xboxkrnl.lib`, `libcmtd.lib`, `xapilibd.lib`, `d3d8d.lib`, `d3dx8d.lib`, `xapilib.lib`, `d3d8.lib`, `d3dx8.lib`, `xgraphicsd.lib`, `dsound.lib`)
+- Standard RXDK libraries (`xtl`, `xgraphics`, `xboxkrnl`, `libcmtd`, `xapilibd`, `d3d8d`, `d3dx8d`, `xapilib`, `d3d8`, `d3dx8`, `xgraphicsd`, `dsound`)
 
 ## Usage
 
