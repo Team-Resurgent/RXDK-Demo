@@ -47,7 +47,22 @@ the RXDK environment.
 
 - Build the project using RXDK
 - Deploy the resulting XBE to an original Xbox or compatible emulator
-- Navigate menus using a standard Xbox controller
+- Navigate using a standard Xbox controller
+
+## Controls
+
+### Global
+- A: Skip Scene
+- B: Exit to Dashboard
+- Start: Play / Pause Music
+
+### Per Scene:
+#### BallScene
+- X: Spawn
+- Y: Material Change
+
+#### DripScene
+- Y: Enable / Disable rain effect
 
 ## Purpose
 
