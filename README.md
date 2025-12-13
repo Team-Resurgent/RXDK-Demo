@@ -30,8 +30,6 @@ the RXDK environment.
 
 ## Constraints / Design Notes
 
-- No reliance on Microsoft XDK headers or libraries
-- Avoids unsupported symbols (e.g. `__ftol2_sse`)
 - No per-frame heap allocation
 - No RNG usage in render paths
 - Z-buffer disabled for predictable visuals
@@ -41,7 +39,7 @@ the RXDK environment.
 
 - RXDK toolchain
 - Compatible C++ compiler for RXDK
-- Standard RXDK libraries (`xtl`, `xgraphics`, etc.)
+- Standard RXDK libraries (`xtl`, `xgraphics`, `xboxkrnl.lib`, `libcmtd.lib`, `xapilibd.lib`, `d3d8d.lib`, `d3dx8d.lib`, `xapilib.lib`, `d3d8.lib`, `d3dx8.lib`, `xgraphicsd.lib`, `dsound.lib`)
 
 ## Usage
 
