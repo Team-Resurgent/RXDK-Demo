@@ -14,6 +14,7 @@
 
 #include "IntroScene.h"
 #include "PlasmaScene.h"
+#include "BallScene.h"
 #include "RingScene.h"
 #include "GalaxyScene.h"
 #include "UVRXDKScene.h"
@@ -42,6 +43,7 @@ enum DemoSceneId
 {
     SCENE_INTRO = 0,
     SCENE_PLASMA,
+	SCENE_BALL,
     SCENE_RING,
     SCENE_GALAXY,
     SCENE_UVRXDK,
@@ -71,6 +73,7 @@ static DemoState g_demo = {};
 // durations in milliseconds
 static const DWORD INTRO_SCENE_MS = 30000;
 static const DWORD PLASMA_SCENE_MS = 20000;
+static const DWORD BALL_SCENE_MS = 25000;
 static const DWORD RING_SCENE_MS = 20000;
 static const DWORD GALAXY_SCENE_MS = 25000;
 static const DWORD UVRXDK_SCENE_MS = 22000;
@@ -78,7 +81,7 @@ static const DWORD X_SCENE_MS = 25000;
 static const DWORD CUBE_SCENE_MS = 22000;
 static const DWORD DRIP_SCENE_MS = 26000;
 static const DWORD CITY_SCENE_MS = 24000;
-static const DWORD CREDITS_SCENE_MS = 35000;
+static const DWORD CREDITS_SCENE_MS = 25000;
 
 static const DWORD FADE_DURATION_MS = 1000;
 
@@ -155,6 +158,7 @@ static void InitScene(DemoSceneId id)
     {
     case SCENE_INTRO:   IntroScene_Init();   break;
     case SCENE_PLASMA:  PlasmaScene_Init();  break;
+    case SCENE_BALL:    BallScene_Init();    break;
     case SCENE_RING:    RingScene_Init();    break;
     case SCENE_GALAXY:  GalaxyScene_Init();  break;
     case SCENE_UVRXDK:  UVRXDKScene_Init();  break;
@@ -173,6 +177,7 @@ static void ShutdownScene(DemoSceneId id)
     {
     case SCENE_INTRO:   IntroScene_Shutdown();   break;
     case SCENE_PLASMA:  PlasmaScene_Shutdown();  break;
+	case SCENE_BALL:    BallScene_Shutdown();    break;
     case SCENE_RING:    RingScene_Shutdown();    break;
     case SCENE_GALAXY:  GalaxyScene_Shutdown();  break;
     case SCENE_UVRXDK:  UVRXDKScene_Shutdown();  break;
@@ -191,6 +196,7 @@ static void RenderScene(DemoSceneId id, float demoTime)
     {
     case SCENE_INTRO:   IntroScene_Render(demoTime);   break;
     case SCENE_PLASMA:  PlasmaScene_Render(demoTime);  break;
+	case SCENE_BALL:    BallScene_Render();    break;
     case SCENE_RING:    RingScene_Render(demoTime);    break;
     case SCENE_GALAXY:  GalaxyScene_Render(demoTime);  break;
     case SCENE_UVRXDK:  UVRXDKScene_Render(demoTime);  break;
@@ -410,6 +416,9 @@ void __cdecl main()
 
         PumpInput();
         WORD buttons = GetButtons();
+
+		BallScene_Update();
+		BallScene_Render();
 
         WORD pressed = (WORD)(buttons & (WORD)~lastButtons);
         lastButtons = buttons;

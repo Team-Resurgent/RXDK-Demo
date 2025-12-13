@@ -1,12 +1,9 @@
-// Credits.cpp - Star Wars style scroller (RXDK)
+// Credits.cpp - Star Wars style scroller with dynamic starfield (RXDK)
 // Uses DrawText() from your font.cpp/.h
 //
-// Tweaks vs previous:
-// - Less “pinch” (reduced pull-in strength, slightly larger min scale)
-// - Less “choppy” feel (slower scroll + consistent per-line gap computation,
-//   and no fixed-gap stepping in the early-skip path)
-//
-// Requirements hit:
+// Features:
+// - Dynamic parallax starfield background
+// - Star Wars perspective text scroll
 // - No per-frame allocations
 // - No float->int casts (avoid __ftol2_sse)
 // - Each shoutout name is a different color
@@ -25,6 +22,184 @@
 
 static bool  s_active = false;
 static DWORD s_startTicks = 0;
+
+// ------------------------------------------------------------
+// Starfield
+// ------------------------------------------------------------
+
+static const int STAR_COUNT = 200;
+static const float SCREEN_W = 640.0f;
+static const float SCREEN_H = 480.0f;
+
+struct Star
+{
+    float x, y;        // Screen position
+    float z;           // Depth (0.0 = far, 1.0 = near)
+    float baseX;       // Base X position for parallax
+    BYTE brightness;   // 0-255
+    BYTE colorType;    // 0-7 for different star colors
+};
+
+static Star s_stars[STAR_COUNT];
+static bool s_starsInit = false;
+
+// Simple LCG for star initialization (Init-only, no per-frame RNG)
+static unsigned s_starSeed = 0x1234ABCD;
+
+static unsigned StarRand()
+{
+    s_starSeed = s_starSeed * 1664525u + 1013904223u;
+    return s_starSeed;
+}
+
+static void InitStarfield()
+{
+    if (s_starsInit) return;
+
+    s_starSeed ^= GetTickCount();
+
+    for (int i = 0; i < STAR_COUNT; ++i)
+    {
+        Star& s = s_stars[i];
+
+        // Random depth
+        unsigned r = StarRand();
+        unsigned zInt = (r & 1023u);  // 0-1023
+        s.z = (float)zInt * (1.0f / 1023.0f);  // 0.0-1.0
+
+        // Base X position (will parallax)
+        r = StarRand();
+        unsigned xInt = (r % 640u);
+        s.baseX = (float)xInt;
+        s.x = s.baseX;
+
+        // Y position
+        r = StarRand();
+        unsigned yInt = (r % 480u);
+        s.y = (float)yInt;
+
+        // Brightness based on depth (far = dim, near = bright)
+        unsigned brightInt = 80u + (unsigned)(s.z * 175.0f);
+        if (brightInt > 255u) brightInt = 255u;
+        s.brightness = (BYTE)brightInt;
+
+        // Color type (variety of star colors)
+        r = StarRand();
+        s.colorType = (BYTE)(r & 7u);  // 0-7
+    }
+
+    s_starsInit = true;
+}
+
+static void UpdateStarfield(float scrollY)
+{
+    // Parallax: stars move based on depth and scroll position
+    // Far stars move less, near stars move more
+    for (int i = 0; i < STAR_COUNT; ++i)
+    {
+        Star& s = s_stars[i];
+
+        // Vertical scroll (stars move up as credits scroll up)
+        // Faster stars = closer
+        float speed = 0.15f + s.z * 0.35f;  // 0.15-0.50
+        s.y -= speed;
+
+        // Wrap around
+        if (s.y < -10.0f)
+            s.y += SCREEN_H + 20.0f;
+
+        // Horizontal parallax based on scroll position
+        // Creates slight drift as credits scroll
+        float parallax = (scrollY * 0.02f) * (s.z - 0.5f);
+        s.x = s.baseX + parallax;
+
+        // Wrap horizontal
+        if (s.x < 0.0f) s.x += SCREEN_W;
+        if (s.x > SCREEN_W) s.x -= SCREEN_W;
+    }
+}
+
+static DWORD GetStarColor(BYTE colorType, BYTE brightness, float time)
+{
+    // Pulsing factor (subtle)
+    float pulse = 0.85f + 0.15f * sinf(time * 0.5f + (float)colorType * 0.7f);
+    unsigned b = (unsigned)((float)brightness * pulse);
+    if (b > 255u) b = 255u;
+
+    BYTE br = (BYTE)b;
+
+    // Different star color types
+    switch (colorType)
+    {
+    case 0: // Blue-white (most common)
+        return D3DCOLOR_ARGB(br, br, br, 255);
+    case 1: // Cyan
+        return D3DCOLOR_ARGB(br, (BYTE)(br >> 1), br, 255);
+    case 2: // Pink/Magenta
+        return D3DCOLOR_ARGB(br, 255, (BYTE)(br >> 1), 255);
+    case 3: // Yellow
+        return D3DCOLOR_ARGB(br, 255, 255, (BYTE)(br >> 1));
+    case 4: // Orange
+        return D3DCOLOR_ARGB(br, 255, (BYTE)(br >> 1) + 80, (BYTE)(br >> 2));
+    case 5: // Purple
+        return D3DCOLOR_ARGB(br, 200, 100, 255);
+    case 6: // Green-white
+        return D3DCOLOR_ARGB(br, (BYTE)(br >> 1), 255, (BYTE)(br >> 1));
+    case 7: // Pure white (bright)
+        return D3DCOLOR_ARGB(br, 255, 255, 255);
+    default:
+        return D3DCOLOR_ARGB(br, br, br, br);
+    }
+}
+
+static void RenderStarfield()
+{
+    extern LPDIRECT3DDEVICE8 g_pDevice;
+    if (!g_pDevice) return;
+
+    DWORD now = GetTickCount();
+    float time = (float)(now - s_startTicks) * 0.001f;
+
+    struct StarVtx
+    {
+        float x, y, z, rhw;
+        DWORD color;
+    };
+
+    g_pDevice->SetTexture(0, NULL);
+    g_pDevice->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+
+    g_pDevice->SetRenderState(D3DRS_ZENABLE, FALSE);
+    g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
+    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+
+    // Draw stars as points (2x2 pixels for visibility)
+    for (int i = 0; i < STAR_COUNT; ++i)
+    {
+        const Star& s = s_stars[i];
+
+        DWORD col = GetStarColor(s.colorType, s.brightness, time + (float)i * 0.1f);
+
+        // Draw as small quad
+        float size = 1.0f + s.z * 1.5f;  // Bigger when closer
+
+        // Twinkle effect - vary size slightly
+        float twinkle = 0.9f + 0.2f * sinf(time * 2.0f + (float)i * 0.3f);
+        size *= twinkle;
+
+        StarVtx quad[4] =
+        {
+            { s.x,        s.y,        0.0f, 1.0f, col },
+            { s.x + size, s.y,        0.0f, 1.0f, col },
+            { s.x,        s.y + size, 0.0f, 1.0f, col },
+            { s.x + size, s.y + size, 0.0f, 1.0f, col },
+        };
+
+        g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(StarVtx));
+    }
+}
 
 // ------------------------------------------------------------
 // Helpers
@@ -167,7 +342,7 @@ static float s_lineGap = 26.0f;
 // Start off-screen (bottom)
 static float s_bottomStartY = 520.0f;
 
-// Where it “vanishes” into distance
+// Where it "vanishes" into distance
 static float s_horizonY = 90.0f;
 
 // 640/2
@@ -181,7 +356,7 @@ static float ComputeTotalHeight()
 }
 
 // Perspective mapping:
-// As y approaches horizon, scale down and “pull in” (Star Wars feel).
+// As y approaches horizon, scale down and "pull in" (Star Wars feel).
 static void GetPerspectiveForY(float y, float* outScale, float* outPull)
 {
     // t=0 at bottom-ish, t=1 at horizon
@@ -191,9 +366,9 @@ static void GetPerspectiveForY(float y, float* outScale, float* outPull)
     // non-linear shrink
     float s = (1.0f - t);
     s = s * s;                  // stronger falloff near horizon
-    s = 0.30f + 0.70f * s;       // larger minimum size (less “pinched”/tiny)
+    s = 0.30f + 0.70f * s;       // larger minimum size (less "pinched"/tiny)
 
-    // pull-in (narrowing) as it goes “back”
+    // pull-in (narrowing) as it goes "back"
     // (reduced from 0.65 -> 0.45 to avoid over-pinching)
     float pull = 1.0f - 0.45f * t;
 
@@ -209,11 +384,13 @@ void Credits_Init()
 {
     s_active = true;
     s_startTicks = GetTickCount();
+    InitStarfield();
 }
 
 void Credits_Shutdown()
 {
     s_active = false;
+    s_starsInit = false;
 }
 
 bool Credits_IsFinished()
@@ -235,13 +412,18 @@ void Credits_Render(float)
     extern LPDIRECT3DDEVICE8 g_pDevice;
     if (!s_active || !g_pDevice) return;
 
-    Setup2DTextStates();
-
     const DWORD now = GetTickCount();
     const float tSec = (float)(now - s_startTicks) * (1.0f / 1000.0f);
 
     // Base Y for first line
     float y = s_bottomStartY - tSec * s_speedPxPerSec;
+
+    // Update and render starfield background
+    UpdateStarfield(tSec * s_speedPxPerSec);
+    RenderStarfield();
+
+    // Render credits text
+    Setup2DTextStates();
 
     for (int i = 0; i < LINE_COUNT; ++i)
     {
@@ -275,7 +457,7 @@ void Credits_Render(float)
 
         float sFinal = scale * sMul;
 
-        // Center + “pull in” towards center as it recedes
+        // Center + "pull in" towards center as it recedes
         const float w = MeasureTextWidth(L.text, sFinal);
         float x = s_centerX - (w * 0.5f);
 

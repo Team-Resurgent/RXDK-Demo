@@ -11,6 +11,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="BallScene.cpp" />
     <ClCompile Include="CityScene.cpp" />
     <ClCompile Include="Credits.cpp" />
     <ClCompile Include="CubeScene.cpp" />
@@ -30,6 +31,7 @@
     <Text Include="Media\Copy Assets Here.txt" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="BallScene.h" />
     <ClInclude Include="CityScene.h" />
     <ClInclude Include="Credits.h" />
     <ClInclude Include="CubeScene.h" />

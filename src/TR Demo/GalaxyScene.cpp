@@ -10,6 +10,7 @@
 // - No float->int casts in Render
 
 #include "GalaxyScene.h"
+#include "font.h"
 
 #include <xtl.h>
 #include <xgraphics.h>
@@ -31,21 +32,21 @@ static const float  SCREEN_H = 480.0f;
 static const int    LUT_N = 1024;
 
 // Increased particle counts for better density and arm visibility
-static const int    STAR_SMALL_COUNT = 10000;
+static const int    STAR_SMALL_COUNT = 15000;
 static const int    STAR_LARGE_COUNT = 1200;
-static const int    DUST_COUNT = 600;
-static const int    NEBULA_COUNT = 450;  // Increased for more visible emission regions
-static const int    DISC_COUNT = 3500;  // NEW: central disc particles (reduced slightly to let arms show)
+static const int    DUST_COUNT = 675;
+static const int    NEBULA_COUNT = 675;  // Increased for more visible emission regions
+static const int    DISC_COUNT = 2500;  // NEW: central disc particles (reduced slightly to let arms show)
 
 static const int    BATCH_QUADS = 512;
 
 // Galaxy shape
 static const int    ARMS = 4;
-static const int    RMAX_PX = 320;
-static const int    RCORE_PX = 50;   // Smaller, denser core
+static const int    RMAX_PX = 420;
+static const int    RCORE_PX = 20;   // Smaller, denser core
 static const int    TWIST_MAX = 280;
-static const int    SPREAD_MAX = 28;
-static const float  ELLIPSE_Y = 0.68f;
+static const int    SPREAD_MAX = 48;
+static const float  ELLIPSE_Y = 0.78f;
 
 // Camera sweep
 static const float  SWEEP_X = 140.0f;
@@ -66,6 +67,43 @@ static const float  NEBULA_SIZE_MAX = 24.0f;
 // NEW: Disc size range (larger for smooth continuous glow and visibility)
 static const float  DISC_SIZE_MIN = 5.5f;
 static const float  DISC_SIZE_MAX = 10.5f;
+
+// -----------------------------------------------------------------------------
+// String helpers
+// -----------------------------------------------------------------------------
+
+static void IntToStr(int val, char* buf, int bufSize)
+{
+    if (bufSize < 2) return;
+
+    if (val == 0)
+    {
+        buf[0] = '0';
+        buf[1] = '\0';
+        return;
+    }
+
+    bool neg = (val < 0);
+    if (neg) val = -val;
+
+    char temp[32];
+    int pos = 0;
+
+    while (val > 0 && pos < 31)
+    {
+        temp[pos++] = (char)('0' + (val % 10));
+        val /= 10;
+    }
+
+    int writePos = 0;
+    if (neg && writePos < bufSize - 1)
+        buf[writePos++] = '-';
+
+    for (int i = pos - 1; i >= 0 && writePos < bufSize - 1; --i)
+        buf[writePos++] = temp[i];
+
+    buf[writePos] = '\0';
+}
 
 // -----------------------------------------------------------------------------
 // LUT trig
@@ -1153,4 +1191,27 @@ void GalaxyScene_Render(float)
     RenderStars(s_small, STAR_SMALL_COUNT, s_texSprite, tMs, 0);
     RenderNebula(s_nebula, NEBULA_COUNT, s_texSprite, tMs);
     RenderStars(s_large, STAR_LARGE_COUNT, s_texSprite, tMs, 1);
+
+    // Stats overlay
+    g_pDevice->SetTexture(0, NULL);
+    g_pDevice->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+
+    char buf[64];
+
+    IntToStr(STAR_SMALL_COUNT + STAR_LARGE_COUNT, buf, sizeof(buf));
+    DrawText(10.0f, 10.0f, "STARS: ", 2.0f, D3DCOLOR_XRGB(200, 220, 255));
+    DrawText(120.0f, 10.0f, buf, 2.0f, D3DCOLOR_XRGB(200, 220, 255));
+
+    IntToStr(NEBULA_COUNT, buf, sizeof(buf));
+    DrawText(10.0f, 30.0f, "NEBULAE: ", 2.0f, D3DCOLOR_XRGB(255, 140, 200));
+    DrawText(160.0f, 30.0f, buf, 2.0f, D3DCOLOR_XRGB(255, 140, 200));
+
+    IntToStr(DUST_COUNT, buf, sizeof(buf));
+    DrawText(10.0f, 50.0f, "DUST: ", 2.0f, D3DCOLOR_XRGB(180, 170, 160));
+    DrawText(110.0f, 50.0f, buf, 2.0f, D3DCOLOR_XRGB(180, 170, 160));
+
+    IntToStr((int)(tMs / 1000), buf, sizeof(buf));
+    DrawText(10.0f, 70.0f, "TIME: ", 2.0f, D3DCOLOR_XRGB(140, 210, 255));
+    DrawText(110.0f, 70.0f, buf, 2.0f, D3DCOLOR_XRGB(140, 210, 255));
 }

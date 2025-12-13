@@ -319,7 +319,7 @@ void RingScene_Init()
         s_tex = nullptr;
     }
 
-    if (FAILED(D3DXCreateTextureFromFileA(g_pDevice, "D:\\metal.dds", &s_tex)))
+    if (FAILED(D3DXCreateTextureFromFileA(g_pDevice, "D:\\tex\\metal.dds", &s_tex)))
     {
         s_tex = nullptr; // still runs even if texture is missing
     }
