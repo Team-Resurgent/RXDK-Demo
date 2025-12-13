@@ -7,9 +7,10 @@ official Microsoft XDK.
 This project is intended for experimentation, prototyping, and learning within
 the RXDK environment.
 
+
+
 ## Features
 
-- RXDK-compatible Xbox executable
 - Custom rendering pipeline using `xgraphics`
 - Button-mapped actions (no mouse / no virtual cursors)
 - Designed for deterministic rendering (no dynamic allocations per frame)
@@ -18,6 +19,7 @@ the RXDK environment.
 
 - IntroScene - Opening title/logo sequence
 - PlasmaScene - Fullscreen animated plasma effect with swirling color patterns and camera drift
+- BallScene - Physics demo with bouncing balls featuring squash/stretch deformation and multiple materials (rubber, chrome, glass, plasma)
 - RingScene - Animated ring/torus geometry effects
 - GalaxyScene - Procedural space scene with stars, nebulae, and dust particles with stats overlay
 - UVRXDKScene - Large wireframe "RXDK" letters with music-reactive VU meter fills
@@ -29,8 +31,6 @@ the RXDK environment.
 
 ## Constraints / Design Notes
 
-- No reliance on Microsoft XDK headers or libraries
-- Avoids unsupported symbols (e.g. `__ftol2_sse`)
 - No per-frame heap allocation
 - No RNG usage in render paths
 - Z-buffer disabled for predictable visuals
@@ -40,13 +40,28 @@ the RXDK environment.
 
 - RXDK toolchain
 - Compatible C++ compiler for RXDK
-- Standard RXDK libraries (`xtl`, `xgraphics`, etc.)
+- Standard RXDK libraries (`xtl`, `xgraphics`, `xboxkrnl`, `libcmtd`, `xapilibd`, `d3d8d`, `d3dx8d`, `xapilib`, `d3d8`, `d3dx8`, `xgraphicsd`, `dsound`)
 
 ## Usage
 
 - Build the project using RXDK
 - Deploy the resulting XBE to an original Xbox or compatible emulator
-- Navigate menus using a standard Xbox controller
+- Navigate using a standard Xbox controller
+
+## Controls
+
+### Global
+- A: Skip Scene
+- B: Exit to Dashboard
+- Start: Play / Pause Music
+
+### Per Scene:
+#### BallScene
+- X: Spawn
+- Y: Material Change
+
+#### DripScene
+- Y: Enable / Disable rain effect
 
 ## Purpose
 
