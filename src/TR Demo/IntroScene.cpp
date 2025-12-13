@@ -370,8 +370,8 @@ void IntroScene_Init()
     s_phaseFrame = 0;
 
     // Expects square, power-of-two A8R8G8B8 DDS (e.g. 512x512)
-    s_logoTex = LoadTextureFromDDS("D:\\tr.dds", s_logoW, s_logoH);
-    s_xbsTex = LoadTextureFromDDS("D:\\xbs.dds", s_xbsW, s_xbsH);
+    s_logoTex = LoadTextureFromDDS("D:\\tex\\tr.dds", s_logoW, s_logoH);
+    s_xbsTex = LoadTextureFromDDS("D:\\tex\\xbs.dds", s_xbsW, s_xbsH);
 }
 
 void IntroScene_Shutdown()

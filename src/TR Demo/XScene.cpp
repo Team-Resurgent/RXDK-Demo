@@ -359,8 +359,8 @@ static void LoadSmokeTexture()
 {
     if (s_smokeTex || !g_pDevice) return;
 
-    const char* p0 = "D:\\galaxy\\cloud_256.dds";
-    const char* p1 = "galaxy\\cloud_256.dds";
+    const char* p0 = "D:\\tex\\cloud_256.dds";
+    const char* p1 = "tex\\cloud_256.dds";
 
     if (FAILED(D3DXCreateTextureFromFileA(g_pDevice, p0, &s_smokeTex)))
         D3DXCreateTextureFromFileA(g_pDevice, p1, &s_smokeTex);

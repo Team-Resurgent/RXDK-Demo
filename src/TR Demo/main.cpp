@@ -21,6 +21,7 @@
 
 #include "CubeScene.h"
 #include "CityScene.h"
+#include "DripScene.h"
 #include "Credits.h"
 
 // -----------------------------------------------------------------------------
@@ -46,6 +47,7 @@ enum DemoSceneId
     SCENE_UVRXDK,
     SCENE_X,
     SCENE_CUBE,
+    SCENE_DRIP,
     SCENE_CREDITS,
     SCENE_CITY,
     SCENE_COUNT
@@ -74,6 +76,7 @@ static const DWORD GALAXY_SCENE_MS = 25000;
 static const DWORD UVRXDK_SCENE_MS = 22000;
 static const DWORD X_SCENE_MS = 25000;
 static const DWORD CUBE_SCENE_MS = 22000;
+static const DWORD DRIP_SCENE_MS = 26000;
 static const DWORD CITY_SCENE_MS = 24000;
 static const DWORD CREDITS_SCENE_MS = 35000;
 
@@ -157,6 +160,7 @@ static void InitScene(DemoSceneId id)
     case SCENE_UVRXDK:  UVRXDKScene_Init();  break;
     case SCENE_X:       XScene_Init();       break;
     case SCENE_CUBE:    CubeScene_Init();    break;
+    case SCENE_DRIP:    DripScene_Init();    break;
     case SCENE_CREDITS: Credits_Init();      break;
     case SCENE_CITY:    CityScene_Init();    break;
     default: break;
@@ -174,6 +178,7 @@ static void ShutdownScene(DemoSceneId id)
     case SCENE_UVRXDK:  UVRXDKScene_Shutdown();  break;
     case SCENE_X:       XScene_Shutdown();       break;
     case SCENE_CUBE:    CubeScene_Shutdown();    break;
+    case SCENE_DRIP:    DripScene_Shutdown(); break;
     case SCENE_CREDITS: Credits_Shutdown();      break;
     case SCENE_CITY:    CityScene_Shutdown();    break;
     default: break;
@@ -191,6 +196,7 @@ static void RenderScene(DemoSceneId id, float demoTime)
     case SCENE_UVRXDK:  UVRXDKScene_Render(demoTime);  break;
     case SCENE_X:       XScene_Render(demoTime);       break;
     case SCENE_CUBE:    CubeScene_Render(demoTime);    break;
+    case SCENE_DRIP:    DripScene_Render();  break;\
     case SCENE_CREDITS: Credits_Render(demoTime);      break;
     case SCENE_CITY:    CityScene_Render(demoTime);    break;
     default: break;
@@ -233,7 +239,7 @@ static void DrawFadeOverlay(int alpha)
     g_pDevice->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
     g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
     g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-    g_pDevice->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+    g_pDevice->SetRenderState(D3DRS_ZENABLE, D3DZB_TRUE);
     g_pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
     g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
 
@@ -280,6 +286,7 @@ static DWORD SceneDurationMs(DemoSceneId id)
     case SCENE_UVRXDK:  return UVRXDK_SCENE_MS;
     case SCENE_X:       return X_SCENE_MS;
     case SCENE_CUBE:    return CUBE_SCENE_MS;
+    case SCENE_DRIP:    return DRIP_SCENE_MS;
     case SCENE_CREDITS: return CREDITS_SCENE_MS;
     case SCENE_CITY:    return CITY_SCENE_MS;
     default:            return 20000;
@@ -378,7 +385,7 @@ void __cdecl main()
 
     InitInput();
 
-    Music_Init("D:\\idk.trm");
+    Music_Init("D:\\snd\\idk.trm");
     Music_Play();
     bool musicPaused = false;
 
@@ -419,6 +426,17 @@ void __cdecl main()
         bool requestSkip = (pressed & BTN_A) != 0;
 
         Music_Update();
+
+        Music_Update();
+
+        if (g_demo.current == SCENE_DRIP && !g_demo.inTransition)
+        {
+            DripScene_Update();
+        }
+
+        UpdateDemoState(now, requestSkip);
+        RenderFrame(demoTime);
+
 
         UpdateDemoState(now, requestSkip);
         RenderFrame(demoTime);

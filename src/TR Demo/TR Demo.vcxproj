@@ -14,6 +14,7 @@
     <ClCompile Include="CityScene.cpp" />
     <ClCompile Include="Credits.cpp" />
     <ClCompile Include="CubeScene.cpp" />
+    <ClCompile Include="DripScene.cpp" />
     <ClCompile Include="font.cpp" />
     <ClCompile Include="GalaxyScene.cpp" />
     <ClCompile Include="input.cpp" />
@@ -32,6 +33,7 @@
     <ClInclude Include="CityScene.h" />
     <ClInclude Include="Credits.h" />
     <ClInclude Include="CubeScene.h" />
+    <ClInclude Include="DripScene.h" />
     <ClInclude Include="font.h" />
     <ClInclude Include="GalaxyScene.h" />
     <ClInclude Include="input.h" />

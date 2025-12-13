@@ -1083,7 +1083,7 @@ void GalaxyScene_Init()
     BuildTables();
 
     if (s_texSprite) { s_texSprite->Release(); s_texSprite = NULL; }
-    s_texSprite = LoadDDS_A8R8G8B8_Swizzled("D:\\galaxy\\cloud_256.dds");
+    s_texSprite = LoadDDS_A8R8G8B8_Swizzled("D:\\tex\\cloud_256.dds");
 
     if (s_small) { free(s_small); s_small = NULL; }
     if (s_large) { free(s_large); s_large = NULL; }

@@ -948,7 +948,7 @@ void CityScene_Init()
     BuildSunCircle();
 
     // ADDED: Load logo texture
-    s_logoTex = LoadTextureFromDDS("D:\\tr.dds", s_logoW, s_logoH);
+    s_logoTex = LoadTextureFromDDS("D:\\tex\\tr.dds", s_logoW, s_logoH);
 }
 
 void CityScene_Shutdown()
