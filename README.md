@@ -11,7 +11,6 @@ the RXDK environment.
 
 ## Features
 
-- RXDK-compatible Xbox executable
 - Custom rendering pipeline using `xgraphics`
 - Button-mapped actions (no mouse / no virtual cursors)
 - Designed for deterministic rendering (no dynamic allocations per frame)
