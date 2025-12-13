@@ -14,6 +14,19 @@ the RXDK environment.
 - Button-mapped actions (no mouse / no virtual cursors)
 - Designed for deterministic rendering (no dynamic allocations per frame)
 
+ ## RDXK Demos
+
+- IntroScene - Opening title/logo sequence
+- PlasmaScene - Fullscreen animated plasma effect with swirling color patterns and camera drift
+- RingScene - Animated ring/torus geometry effects
+- GalaxyScene - Procedural space scene with stars, nebulae, and dust particles with stats overlay
+- UVRXDKScene - Large wireframe "RXDK" letters with music-reactive VU meter fills
+- XScene - Xbox logo visualization
+- CubeScene - Spinning cube with Matrix-style "RXDK" text rain on all 6 faces
+- CityScene - Animated cityscape/skyline scene
+- DripScene - Interactive water ripple simulation with multi-layer shading, rain mode, and realistic physics
+- Credits - Star Wars-style scrolling credits with perspective and color-coded shoutouts
+
 ## Constraints / Design Notes
 
 - No reliance on Microsoft XDK headers or libraries
