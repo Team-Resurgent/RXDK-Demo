@@ -18,6 +18,7 @@ the RXDK environment.
 
 - IntroScene - Opening title/logo sequence
 - PlasmaScene - Fullscreen animated plasma effect with swirling color patterns and camera drift
+- BallScene - Physics demo with bouncing balls featuring squash/stretch deformation and multiple materials (rubber, chrome, glass, plasma)
 - RingScene - Animated ring/torus geometry effects
 - GalaxyScene - Procedural space scene with stars, nebulae, and dust particles with stats overlay
 - UVRXDKScene - Large wireframe "RXDK" letters with music-reactive VU meter fills
