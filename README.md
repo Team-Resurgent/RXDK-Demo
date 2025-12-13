@@ -1,4 +1,4 @@
-# RXDK Demo – Xbox RGB / Visual Test App
+# RXDK Demo – Visual Test App
 
 A lightweight RXDK-based demo application for the original Xbox, focused on
 rendering visuals and testing input-driven UI logic without relying on the
