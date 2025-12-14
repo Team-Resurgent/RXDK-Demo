@@ -26,7 +26,6 @@
     <ClCompile Include="PlasmaScene.cpp" />
     <ClCompile Include="RingScene.cpp" />
     <ClCompile Include="UVRDXKScene.cpp" />
-    <ClCompile Include="VaultScene.cpp" />
     <ClCompile Include="XScene.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -47,7 +46,6 @@
     <ClInclude Include="PlasmaScene.h" />
     <ClInclude Include="RingScene.h" />
     <ClInclude Include="UVRXDKScene.h" />
-    <ClInclude Include="VaultScene.h" />
     <ClInclude Include="XScene.h" />
   </ItemGroup>
   <ItemGroup>
