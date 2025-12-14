@@ -27,6 +27,7 @@ the RXDK environment.
 - CubeScene - Spinning cube with Matrix-style "RXDK" text rain on all 6 faces
 - CityScene - Animated cityscape/skyline scene
 - DripScene - Interactive water ripple simulation with multi-layer shading, rain mode, and realistic physics
+- MazeScene - A cel shaded Windows 95 like maze
 - Credits - Star Wars-style scrolling credits with perspective and color-coded shoutouts
 
 ## Constraints / Design Notes

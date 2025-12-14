@@ -27,14 +27,18 @@ static const float SCREEN_W = 640.0f;
 static const float SCREEN_H = 480.0f;
 
 static const int MAX_BALLS = 16;
-static const float GRAVITY = 980.0f;  // pixels/sec^2
+static const float GRAVITY = 980.0f;       // pixels/sec^2
 static const float FLOOR_Y = 420.0f;
-static const float RESTITUTION = 0.75f;  // Bounciness
-static const float FRICTION = 0.98f;
 
 // Sphere mesh resolution
 static const int SPHERE_SLICES = 24;
 static const int SPHERE_STACKS = 16;
+
+// Collision tuning (stability / stack settling)
+static const float COLLISION_SLOP = 0.5f;      // pixels
+static const float POSITION_CORRECT_PCT = 0.60f;
+static const float RESTING_VEL_EPS = 6.0f;     // px/s
+static const float RESTING_DAMP = 0.80f;       // extra damp when nearly resting on floor
 
 // Material types
 enum MaterialType
@@ -130,7 +134,7 @@ struct Ball
 
     // Material physics properties
     float restitution;    // Bounciness (0.0 - 1.0)
-    float friction;       // Surface friction
+    float friction;       // Surface friction (0.0 - 1.0)
 
     // Effects
     float glowIntensity;
@@ -169,6 +173,11 @@ static float Clamp(float v, float min, float max)
     if (v < min) return min;
     if (v > max) return max;
     return v;
+}
+
+static float SqrtSafe(float v)
+{
+    return (v <= 0.0f) ? 0.0f : sqrtf(v);
 }
 
 // -----------------------------------------------------------------------------
@@ -242,13 +251,13 @@ static void CreateSphereMesh()
             int base = stack * (SPHERE_SLICES + 1) + slice;
             int next = base + SPHERE_SLICES + 1;
 
-            indices[idxPos++] = base;
-            indices[idxPos++] = next;
-            indices[idxPos++] = base + 1;
+            indices[idxPos++] = (WORD)base;
+            indices[idxPos++] = (WORD)next;
+            indices[idxPos++] = (WORD)(base + 1);
 
-            indices[idxPos++] = base + 1;
-            indices[idxPos++] = next;
-            indices[idxPos++] = next + 1;
+            indices[idxPos++] = (WORD)(base + 1);
+            indices[idxPos++] = (WORD)next;
+            indices[idxPos++] = (WORD)(next + 1);
         }
     }
 
@@ -259,17 +268,37 @@ static void CreateSphereMesh()
 // Ball management
 // -----------------------------------------------------------------------------
 
+static float MaterialDensity(MaterialType mat)
+{
+    // “Weight feel” knob: higher => heavier for same radius.
+    // (2D sim uses area ~ r^2, so density scales mass nicely.)
+    switch (mat)
+    {
+    case MAT_RUBBER: return 1.00f;
+    case MAT_CHROME: return 2.40f; // heavy metal
+    case MAT_GLASS:  return 1.60f; // medium-heavy
+    case MAT_PLASMA: return 0.65f; // floaty
+    default:         return 1.00f;
+    }
+}
+
 static void SpawnBall(float x, float y, float vx, float vy, float radius, MaterialType mat)
 {
     if (s_ballCount >= MAX_BALLS) return;
 
     Ball& b = s_balls[s_ballCount++];
+
     b.x = x;
     b.y = y;
     b.vx = vx;
     b.vy = vy;
     b.radius = radius;
-    b.mass = radius * radius;
+
+    // Mass = area * density (2D)
+    float dens = MaterialDensity(mat);
+    b.mass = (radius * radius) * dens;
+    if (b.mass < 1.0f) b.mass = 1.0f;
+
     b.squashX = 1.0f;
     b.squashY = 1.0f;
     b.targetSquashX = 1.0f;
@@ -284,23 +313,23 @@ static void SpawnBall(float x, float y, float vx, float vy, float radius, Materi
     {
     case MAT_RUBBER:
         b.baseColor = D3DCOLOR_XRGB(200, 50, 50);
-        b.restitution = 0.85f;  // Very bouncy
-        b.friction = 0.95f;      // Medium friction
+        b.restitution = 0.85f;   // very bouncy
+        b.friction = 0.92f;      // grippy
         break;
     case MAT_CHROME:
         b.baseColor = D3DCOLOR_XRGB(200, 200, 220);
-        b.restitution = 0.65f;  // Less bouncy (heavy metal)
-        b.friction = 0.99f;      // Slippery
+        b.restitution = 0.55f;   // heavy metal: loses energy
+        b.friction = 0.985f;     // slippery
         break;
     case MAT_GLASS:
         b.baseColor = D3DCOLOR_ARGB(128, 150, 200, 255);
-        b.restitution = 0.70f;  // Hard/brittle bounce
-        b.friction = 0.97f;      // Smooth surface
+        b.restitution = 0.65f;   // hard bounce, but not “springy”
+        b.friction = 0.97f;      // smooth
         break;
     case MAT_PLASMA:
         b.baseColor = D3DCOLOR_XRGB(100, 255, 200);
-        b.restitution = 0.80f;  // Floaty/ethereal
-        b.friction = 0.99f;      // Almost frictionless
+        b.restitution = 0.80f;   // lively
+        b.friction = 0.99f;      // near frictionless
         break;
     }
 }
@@ -311,6 +340,7 @@ static void SpawnBall(float x, float y, float vx, float vy, float radius, Materi
 
 static void UpdatePhysics(float dt)
 {
+    // Integrate + floor/walls
     for (int i = 0; i < s_ballCount; ++i)
     {
         Ball& b = s_balls[i];
@@ -334,19 +364,30 @@ static void UpdatePhysics(float dt)
             // Only bounce if moving downward
             if (b.vy > 0.0f)
             {
+                float preImpact = b.vy;
+
                 b.vy = -b.vy * b.restitution;
                 b.vx *= b.friction;
 
+                // Extra damping when nearly resting (reduces endless jitter)
+                if (fabsf(preImpact) < 120.0f && fabsf(b.vy) < RESTING_VEL_EPS)
+                {
+                    b.vy *= RESTING_DAMP;
+                    b.vx *= RESTING_DAMP;
+                    if (fabsf(b.vy) < 2.0f) b.vy = 0.0f;
+                    if (fabsf(b.vx) < 2.0f) b.vx = 0.0f;
+                }
+
                 // Squash on impact - varies by material
-                float impactSpeed = fabsf(b.vy);
+                float impactSpeed = fabsf(preImpact);
                 float baseSquash = Clamp(impactSpeed / 500.0f, 0.0f, 0.5f);
 
                 // Material squash multipliers
                 float squashMult = 1.0f;
-                if (b.material == MAT_RUBBER) squashMult = 1.5f;      // Very squashy
-                else if (b.material == MAT_GLASS) squashMult = 0.3f;  // Rigid
-                else if (b.material == MAT_CHROME) squashMult = 0.5f; // Hard metal
-                else if (b.material == MAT_PLASMA) squashMult = 1.2f; // Soft/fluid
+                if (b.material == MAT_RUBBER) squashMult = 1.5f;      // very squashy
+                else if (b.material == MAT_GLASS) squashMult = 0.3f;  // rigid
+                else if (b.material == MAT_CHROME) squashMult = 0.5f; // hard metal
+                else if (b.material == MAT_PLASMA) squashMult = 1.2f; // soft/fluid
 
                 float squashAmount = baseSquash * squashMult;
                 b.targetSquashX = 1.0f + squashAmount;
@@ -389,51 +430,130 @@ static void UpdatePhysics(float dt)
         // Fade glow
         b.glowIntensity *= 0.95f;
 
-        // Remove very slow balls
-        if (fabsf(b.vx) < 5.0f && fabsf(b.vy) < 5.0f && b.y + b.radius >= FLOOR_Y - 1.0f)
+        // Hard stop very slow balls on the floor
+        if (fabsf(b.vx) < 2.5f && fabsf(b.vy) < 2.5f && b.y + b.radius >= FLOOR_Y - 0.5f)
         {
             b.vx = 0.0f;
             b.vy = 0.0f;
         }
     }
 
-    // Ball-to-ball collisions (simple)
+    // Ball-to-ball collisions (impulse + friction, stable)
     for (int i = 0; i < s_ballCount; ++i)
     {
         for (int j = i + 1; j < s_ballCount; ++j)
         {
             Ball& a = s_balls[i];
             Ball& b = s_balls[j];
+            if (!a.active || !b.active) continue;
 
             float dx = b.x - a.x;
             float dy = b.y - a.y;
-            float dist = sqrtf(dx * dx + dy * dy);
+
+            float dist2 = dx * dx + dy * dy;
             float minDist = a.radius + b.radius;
+            float minDist2 = minDist * minDist;
 
-            if (dist < minDist && dist > 0.0f)
+            if (dist2 >= minDist2)
+                continue;
+
+            float dist = SqrtSafe(dist2);
+            if (dist < 0.0001f)
             {
-                // Simple elastic collision
-                float nx = dx / dist;
-                float ny = dy / dist;
+                // Prevent NaN normals if perfectly overlapping
+                dx = 1.0f;
+                dy = 0.0f;
+                dist = 1.0f;
+            }
 
-                float overlap = minDist - dist;
-                a.x -= nx * overlap * 0.5f;
-                a.y -= ny * overlap * 0.5f;
-                b.x += nx * overlap * 0.5f;
-                b.y += ny * overlap * 0.5f;
+            // Normal
+            float nx = dx / dist;
+            float ny = dy / dist;
 
-                // Exchange velocities along normal
-                float rvx = b.vx - a.vx;
-                float rvy = b.vy - a.vy;
-                float velAlongNormal = rvx * nx + rvy * ny;
+            // Positional correction (prevents sinking + reduces jitter)
+            float overlap = (minDist - dist);
+            float corr = (overlap - COLLISION_SLOP);
+            if (corr < 0.0f) corr = 0.0f;
+            corr *= POSITION_CORRECT_PCT;
 
-                if (velAlongNormal < 0.0f) continue;
+            float invMa = 1.0f / a.mass;
+            float invMb = 1.0f / b.mass;
+            float invSum = invMa + invMb;
+            if (invSum <= 0.0f) invSum = 1.0f;
 
-                float impulse = velAlongNormal / (1.0f / a.mass + 1.0f / b.mass);
-                a.vx += impulse * nx / a.mass;
-                a.vy += impulse * ny / a.mass;
-                b.vx -= impulse * nx / b.mass;
-                b.vy -= impulse * ny / b.mass;
+            a.x -= nx * (corr * (invMa / invSum));
+            a.y -= ny * (corr * (invMa / invSum));
+            b.x += nx * (corr * (invMb / invSum));
+            b.y += ny * (corr * (invMb / invSum));
+
+            // Relative velocity
+            float rvx = b.vx - a.vx;
+            float rvy = b.vy - a.vy;
+
+            // Velocity along normal
+            float velAlongNormal = rvx * nx + rvy * ny;
+
+            // If they are separating, do nothing
+            if (velAlongNormal > 0.0f)
+                continue;
+
+            // Restitution: mix (use the “bouncier limit” but keep stable)
+            float e = (a.restitution < b.restitution) ? a.restitution : b.restitution;
+
+            // Impulse scalar
+            float jn = -(1.0f + e) * velAlongNormal;
+            jn /= invSum;
+
+            float impX = jn * nx;
+            float impY = jn * ny;
+
+            a.vx -= impX * invMa;
+            a.vy -= impY * invMa;
+            b.vx += impX * invMb;
+            b.vy += impY * invMb;
+
+            // Tangential friction impulse (simple Coulomb-ish)
+            // Compute tangent
+            float tvx = rvx - velAlongNormal * nx;
+            float tvy = rvy - velAlongNormal * ny;
+            float tLen = SqrtSafe(tvx * tvx + tvy * tvy);
+
+            if (tLen > 0.0001f)
+            {
+                float tx = tvx / tLen;
+                float ty = tvy / tLen;
+
+                float velAlongT = rvx * tx + rvy * ty;
+
+                // Friction coefficient: combine surfaces (grippier dominates)
+                float mu = a.friction * b.friction; // 0..1-ish
+
+                float jt = -velAlongT;
+                jt /= invSum;
+
+                // Clamp friction by normal impulse magnitude
+                float maxF = fabsf(jn) * (1.0f - mu);
+                if (jt > maxF) jt = maxF;
+                if (jt < -maxF) jt = -maxF;
+
+                float fX = jt * tx;
+                float fY = jt * ty;
+
+                a.vx -= fX * invMa;
+                a.vy -= fY * invMa;
+                b.vx += fX * invMb;
+                b.vy += fY * invMb;
+            }
+
+            // Kill tiny jitter when both are essentially resting on the floor
+            bool aOnFloor = (a.y + a.radius >= FLOOR_Y - 0.5f);
+            bool bOnFloor = (b.y + b.radius >= FLOOR_Y - 0.5f);
+            if (aOnFloor && bOnFloor)
+            {
+                if (fabsf(a.vx) < 2.0f) a.vx = 0.0f;
+                if (fabsf(b.vx) < 2.0f) b.vx = 0.0f;
+                if (fabsf(a.vy) < 2.0f) a.vy = 0.0f;
+                if (fabsf(b.vy) < 2.0f) b.vy = 0.0f;
             }
         }
     }

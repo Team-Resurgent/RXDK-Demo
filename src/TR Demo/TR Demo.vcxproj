@@ -21,10 +21,12 @@
     <ClCompile Include="input.cpp" />
     <ClCompile Include="IntroScene.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="MazeScene.cpp" />
     <ClCompile Include="music.cpp" />
     <ClCompile Include="PlasmaScene.cpp" />
     <ClCompile Include="RingScene.cpp" />
     <ClCompile Include="UVRDXKScene.cpp" />
+    <ClCompile Include="VaultScene.cpp" />
     <ClCompile Include="XScene.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -40,10 +42,12 @@
     <ClInclude Include="GalaxyScene.h" />
     <ClInclude Include="input.h" />
     <ClInclude Include="IntroScene.h" />
+    <ClInclude Include="MazeScene.h" />
     <ClInclude Include="music.h" />
     <ClInclude Include="PlasmaScene.h" />
     <ClInclude Include="RingScene.h" />
     <ClInclude Include="UVRXDKScene.h" />
+    <ClInclude Include="VaultScene.h" />
     <ClInclude Include="XScene.h" />
   </ItemGroup>
   <ItemGroup>
@@ -190,7 +194,7 @@ MKDIR "$(OutDir)XISO"
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>xboxkrnl.lib;libcmt.lib;xapilib.lib;d3d8.lib;d3dx8.lib</AdditionalDependencies>
+      <AdditionalDependencies>xboxkrnl.lib;libcmt.lib;xapilib.lib;d3d8.lib;d3dx8.lib;dsound.lib;xgraphics.lib</AdditionalDependencies>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <BaseAddress>
       </BaseAddress>

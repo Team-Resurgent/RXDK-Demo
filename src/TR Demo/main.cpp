@@ -23,6 +23,7 @@
 #include "CubeScene.h"
 #include "CityScene.h"
 #include "DripScene.h"
+#include "MazeScene.h"
 #include "Credits.h"
 
 // -----------------------------------------------------------------------------
@@ -43,13 +44,14 @@ enum DemoSceneId
 {
     SCENE_INTRO = 0,
     SCENE_PLASMA,
-	SCENE_BALL,
+    SCENE_BALL,
     SCENE_RING,
     SCENE_GALAXY,
     SCENE_UVRXDK,
     SCENE_X,
     SCENE_CUBE,
     SCENE_DRIP,
+    SCENE_MAZE,
     SCENE_CREDITS,
     SCENE_CITY,
     SCENE_COUNT
@@ -71,16 +73,17 @@ struct DemoState
 static DemoState g_demo = {};
 
 // durations in milliseconds
-static const DWORD INTRO_SCENE_MS = 30000;
-static const DWORD PLASMA_SCENE_MS = 20000;
-static const DWORD BALL_SCENE_MS = 25000;
-static const DWORD RING_SCENE_MS = 20000;
-static const DWORD GALAXY_SCENE_MS = 25000;
-static const DWORD UVRXDK_SCENE_MS = 22000;
-static const DWORD X_SCENE_MS = 25000;
-static const DWORD CUBE_SCENE_MS = 22000;
-static const DWORD DRIP_SCENE_MS = 26000;
-static const DWORD CITY_SCENE_MS = 24000;
+static const DWORD INTRO_SCENE_MS   = 30000;
+static const DWORD PLASMA_SCENE_MS  = 20000;
+static const DWORD BALL_SCENE_MS    = 25000;
+static const DWORD RING_SCENE_MS    = 20000;
+static const DWORD GALAXY_SCENE_MS  = 25000;
+static const DWORD UVRXDK_SCENE_MS  = 22000;
+static const DWORD X_SCENE_MS       = 25000;
+static const DWORD CUBE_SCENE_MS    = 22000;
+static const DWORD DRIP_SCENE_MS    = 26000;
+static const DWORD MAZE_SCENE_MS    = 23000;
+static const DWORD CITY_SCENE_MS    = 24000;
 static const DWORD CREDITS_SCENE_MS = 25000;
 
 static const DWORD FADE_DURATION_MS = 1000;
@@ -104,7 +107,12 @@ static long InitD3D()
     p.BackBufferCount = 1;
     p.SwapEffect = D3DSWAPEFFECT_DISCARD;
     p.Windowed = FALSE;
-    p.EnableAutoDepthStencil = FALSE;
+
+    // === FIX: RXDK-safe depth buffer ===
+    // Xbox D3D8 wants AutoDepthStencil. Manual depth paths are crash-prone.
+    p.EnableAutoDepthStencil = TRUE;
+    p.AutoDepthStencilFormat = D3DFMT_D16;
+
     p.FullScreen_RefreshRateInHz = 60;
     p.FullScreen_PresentationInterval = D3DPRESENT_INTERVAL_ONE;
 
@@ -123,6 +131,11 @@ static long InitD3D()
 
     g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
     g_pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+
+    // === FIX: enable depth testing globally ===
+    g_pDevice->SetRenderState(D3DRS_ZENABLE, TRUE);
+    g_pDevice->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+    g_pDevice->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
 
     return 0;
 }
@@ -165,6 +178,7 @@ static void InitScene(DemoSceneId id)
     case SCENE_X:       XScene_Init();       break;
     case SCENE_CUBE:    CubeScene_Init();    break;
     case SCENE_DRIP:    DripScene_Init();    break;
+    case SCENE_MAZE:    MazeScene_Init();    break;
     case SCENE_CREDITS: Credits_Init();      break;
     case SCENE_CITY:    CityScene_Init();    break;
     default: break;
@@ -177,13 +191,14 @@ static void ShutdownScene(DemoSceneId id)
     {
     case SCENE_INTRO:   IntroScene_Shutdown();   break;
     case SCENE_PLASMA:  PlasmaScene_Shutdown();  break;
-	case SCENE_BALL:    BallScene_Shutdown();    break;
+    case SCENE_BALL:    BallScene_Shutdown();    break;
     case SCENE_RING:    RingScene_Shutdown();    break;
     case SCENE_GALAXY:  GalaxyScene_Shutdown();  break;
     case SCENE_UVRXDK:  UVRXDKScene_Shutdown();  break;
     case SCENE_X:       XScene_Shutdown();       break;
     case SCENE_CUBE:    CubeScene_Shutdown();    break;
-    case SCENE_DRIP:    DripScene_Shutdown(); break;
+    case SCENE_DRIP:    DripScene_Shutdown();    break;
+    case SCENE_MAZE:    MazeScene_Shutdown();    break;
     case SCENE_CREDITS: Credits_Shutdown();      break;
     case SCENE_CITY:    CityScene_Shutdown();    break;
     default: break;
@@ -196,13 +211,14 @@ static void RenderScene(DemoSceneId id, float demoTime)
     {
     case SCENE_INTRO:   IntroScene_Render(demoTime);   break;
     case SCENE_PLASMA:  PlasmaScene_Render(demoTime);  break;
-	case SCENE_BALL:    BallScene_Render();    break;
+    case SCENE_BALL:    BallScene_Render();            break;
     case SCENE_RING:    RingScene_Render(demoTime);    break;
     case SCENE_GALAXY:  GalaxyScene_Render(demoTime);  break;
     case SCENE_UVRXDK:  UVRXDKScene_Render(demoTime);  break;
     case SCENE_X:       XScene_Render(demoTime);       break;
     case SCENE_CUBE:    CubeScene_Render(demoTime);    break;
-    case SCENE_DRIP:    DripScene_Render();  break;\
+    case SCENE_DRIP:    DripScene_Render();            break;
+    case SCENE_MAZE:    MazeScene_Render();            break;
     case SCENE_CREDITS: Credits_Render(demoTime);      break;
     case SCENE_CITY:    CityScene_Render(demoTime);    break;
     default: break;
@@ -245,11 +261,19 @@ static void DrawFadeOverlay(int alpha)
     g_pDevice->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
     g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
     g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-    g_pDevice->SetRenderState(D3DRS_ZENABLE, D3DZB_TRUE);
+
+    // === FIX: overlay must NOT participate in depth ===
+    g_pDevice->SetRenderState(D3DRS_ZENABLE, FALSE);
+    g_pDevice->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+
     g_pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
     g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
 
     g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(FadeVertex));
+
+    // Restore depth for scene rendering expectations
+    g_pDevice->SetRenderState(D3DRS_ZENABLE, FALSE);
+    g_pDevice->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
 }
 
 // -----------------------------------------------------------------------------
@@ -293,6 +317,7 @@ static DWORD SceneDurationMs(DemoSceneId id)
     case SCENE_X:       return X_SCENE_MS;
     case SCENE_CUBE:    return CUBE_SCENE_MS;
     case SCENE_DRIP:    return DRIP_SCENE_MS;
+    case SCENE_MAZE:    return MAZE_SCENE_MS;
     case SCENE_CREDITS: return CREDITS_SCENE_MS;
     case SCENE_CITY:    return CITY_SCENE_MS;
     default:            return 20000;
@@ -366,7 +391,12 @@ static void RenderFrame(float demoTime)
     if (!g_pDevice)
         return;
 
-    g_pDevice->Clear(0, NULL, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 0, 0), 1.0f, 0);
+    // === FIX: clear Z as well ===
+    g_pDevice->Clear(
+        0, NULL,
+        D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER,
+        D3DCOLOR_XRGB(0, 0, 0),
+        1.0f, 0);
 
     g_pDevice->BeginScene();
 
@@ -388,6 +418,27 @@ void __cdecl main()
     {
         while (1) Sleep(1000);
     }
+
+    // ---------------------------------------------------------------------
+    // Display settle: wait for TV to lock after mode switch
+    // ---------------------------------------------------------------------
+    const int SETTLE_FRAMES = 90; // ~1.5s at 60Hz
+
+    for (int i = 0; i < SETTLE_FRAMES; ++i)
+    {
+        g_pDevice->Clear(
+            0, NULL,
+            D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER,
+            D3DCOLOR_XRGB(0, 0, 0),
+            1.0f, 0);
+
+        g_pDevice->BeginScene();
+        g_pDevice->EndScene();
+        g_pDevice->Present(NULL, NULL, NULL, NULL);
+    }
+
+
+    Sleep(1750);
 
     InitInput();
 
@@ -417,9 +468,6 @@ void __cdecl main()
         PumpInput();
         WORD buttons = GetButtons();
 
-		BallScene_Update();
-		BallScene_Render();
-
         WORD pressed = (WORD)(buttons & (WORD)~lastButtons);
         lastButtons = buttons;
 
@@ -436,16 +484,20 @@ void __cdecl main()
 
         Music_Update();
 
-        Music_Update();
+        if (g_demo.current == SCENE_BALL && !g_demo.inTransition)
+        {
+            BallScene_Update();
+        }
 
         if (g_demo.current == SCENE_DRIP && !g_demo.inTransition)
         {
             DripScene_Update();
         }
 
-        UpdateDemoState(now, requestSkip);
-        RenderFrame(demoTime);
-
+        if (g_demo.current == SCENE_MAZE && !g_demo.inTransition)
+        {
+            MazeScene_Update();
+        }
 
         UpdateDemoState(now, requestSkip);
         RenderFrame(demoTime);

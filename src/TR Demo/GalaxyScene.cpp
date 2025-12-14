@@ -31,6 +31,68 @@ static const float  SCREEN_H = 480.0f;
 
 static const int    LUT_N = 1024;
 
+
+// -----------------------------------------------------------------------------
+// On-screen stats (per-frame) - reflects what actually made it to the batch
+// -----------------------------------------------------------------------------
+struct LayerStats
+{
+    int total;
+    int culled;
+    int drawn;
+};
+
+static LayerStats s_statDust;
+static LayerStats s_statDisc;
+static LayerStats s_statSmall;
+static LayerStats s_statNeb;
+static LayerStats s_statLarge;
+
+static __forceinline void Stats_Reset(LayerStats& s) { s.total = s.culled = s.drawn = 0; }
+
+// -----------------------------------------------------------------------------
+// Step fade-in near edges (NO float->int casts; comparisons only)
+// scale256: 256=full, 192=75%, 128=50%, 64=25%, 0=skip
+// -----------------------------------------------------------------------------
+static __forceinline unsigned EdgeScale256_1D(float p, float minP, float maxP)
+{
+    const float FADE1 = 16.0f;
+    const float FADE2 = 32.0f;
+    const float FADE3 = 48.0f;
+
+    if (p < minP) return 0u;
+    if (p > maxP) return 0u;
+
+    // left edge
+    float dL = p - minP;
+    if (dL < FADE3)
+    {
+        if (dL < FADE1) return 64u;
+        if (dL < FADE2) return 128u;
+        return 192u;
+    }
+
+    // right edge
+    float dR = maxP - p;
+    if (dR < FADE3)
+    {
+        if (dR < FADE1) return 64u;
+        if (dR < FADE2) return 128u;
+        return 192u;
+    }
+
+    return 256u;
+}
+
+static __forceinline unsigned MinU(unsigned a, unsigned b) { return (a < b) ? a : b; }
+
+static __forceinline DWORD ApplyAlphaScale256(DWORD argb, unsigned scale256)
+{
+    unsigned a = (unsigned)(argb >> 24) & 255u;
+    a = (a * scale256) >> 8;
+    return (argb & 0x00FFFFFFu) | (a << 24);
+}
+
 // Increased particle counts for better density and arm visibility
 static const int    STAR_SMALL_COUNT = 15000;
 static const int    STAR_LARGE_COUNT = 1200;
@@ -229,12 +291,6 @@ static LPDIRECT3DTEXTURE8 LoadDDS_A8R8G8B8_Swizzled(const char* path)
         return NULL;
     }
 
-    if ((w & (w - 1)) != 0 || (h & (h - 1)) != 0)
-    {
-        CloseHandle(hFile);
-        return NULL;
-    }
-
     DWORD pixelBytes = (DWORD)(w * h * 4);
 
     BYTE* pixels = (BYTE*)malloc(pixelBytes);
@@ -255,12 +311,7 @@ static LPDIRECT3DTEXTURE8 LoadDDS_A8R8G8B8_Swizzled(const char* path)
     CloseHandle(hFile);
 
     LPDIRECT3DTEXTURE8 tex = NULL;
-    if (FAILED(g_pDevice->CreateTexture(
-        (UINT)w, (UINT)h, 1,
-        0,
-        D3DFMT_A8R8G8B8,
-        0,
-        &tex)))
+    if (FAILED(g_pDevice->CreateTexture((UINT)w, (UINT)h, 1, 0, D3DFMT_A8R8G8B8, 0, &tex)))
     {
         free(pixels);
         return NULL;
@@ -291,27 +342,26 @@ static LPDIRECT3DTEXTURE8 LoadDDS_A8R8G8B8_Swizzled(const char* path)
 }
 
 // -----------------------------------------------------------------------------
-// Deterministic PRNG (Init-only)
+// RNG
 // -----------------------------------------------------------------------------
 
-static unsigned s_rng = 0xC0FFEE11u;
-
-static unsigned RngU32()
+static unsigned s_rng = 0x12345678u;
+static __forceinline unsigned RngU32()
 {
-    s_rng = s_rng * 1664525u + 1013904223u;
+    s_rng = (s_rng * 1664525u + 1013904223u);
     return s_rng;
 }
 
-static int RngRangeI(int lo, int hi)
+static __forceinline int RngRangeI(int lo, int hi)
 {
+    if (hi <= lo) return lo;
+    unsigned span = (unsigned)(hi - lo + 1);
     unsigned r = RngU32();
-    int span = (hi - lo) + 1;
-    if (span <= 1) return lo;
     return lo + (int)(r % (unsigned)span);
 }
 
 // -----------------------------------------------------------------------------
-// Scene state
+// Scene state + resources
 // -----------------------------------------------------------------------------
 
 static bool   s_active = false;
@@ -319,93 +369,93 @@ static DWORD  s_startTicks = 0;
 
 static LPDIRECT3DTEXTURE8 s_texSprite = NULL;
 
+// -----------------------------------------------------------------------------
+// 2D batch
+// -----------------------------------------------------------------------------
+
 struct Vtx
 {
     float x, y, z, rhw;
     DWORD c;
     float u, v;
 };
+
 #define FVF_2D_TEX (D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1)
 
 static Vtx* s_batch = NULL;
 static int  s_batchCapVerts = 0;
-
-struct Star
-{
-    int   ang;
-    int   rPix;
-    float jx, jy;
-    int   depth;
-    int   tw;
-    int   sprRot;
-    float ax, ay;
-    int   arm;
-    int   spinDir;
-    int   spinStep;
-    DWORD base;
-    int   type;  // 0=core, 1=arm, 2=inter-arm, 3=outer
-};
-
-static Star* s_small = NULL;
-static Star* s_large = NULL;
-static Star* s_dust = NULL;
-static Star* s_nebula = NULL;
-static Star* s_disc = NULL;  // NEW: central disc
-
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-
-static DWORD TimeMs()
-{
-    DWORD now = GetTickCount();
-    return now - s_startTicks;
-}
+static int  s_batchCountVerts = 0;
 
 static void EnsureBatch(int quads)
 {
-    const int needVerts = quads * 6;
-    if (s_batch && s_batchCapVerts >= needVerts)
+    int wantVerts = quads * 6;
+    if (s_batch && s_batchCapVerts >= wantVerts)
         return;
 
-    if (s_batch) { free(s_batch); s_batch = NULL; s_batchCapVerts = 0; }
-
-    s_batch = (Vtx*)malloc(sizeof(Vtx) * needVerts);
     if (s_batch)
-        s_batchCapVerts = needVerts;
+        free(s_batch);
+
+    s_batch = (Vtx*)malloc(sizeof(Vtx) * wantVerts);
+    s_batchCapVerts = s_batch ? wantVerts : 0;
+    s_batchCountVerts = 0;
 }
 
-static void EmitQuad6(Vtx* dst, float x, float y, float sx, float sy, float rotCs, float rotSn, DWORD c)
+static void Batch_Begin()
 {
-    float x0 = (-sx * rotCs) - (-sy * rotSn);
-    float y0 = (-sx * rotSn) + (-sy * rotCs);
-
-    float x1 = (sx * rotCs) - (-sy * rotSn);
-    float y1 = (sx * rotSn) + (-sy * rotCs);
-
-    float x2 = (-sx * rotCs) - (sy * rotSn);
-    float y2 = (-sx * rotSn) + (sy * rotCs);
-
-    float x3 = (sx * rotCs) - (sy * rotSn);
-    float y3 = (sx * rotSn) + (sy * rotCs);
-
-    dst[0] = { x + x0, y + y0, 0.0f, 1.0f, c, 0.0f, 0.0f };
-    dst[1] = { x + x1, y + y1, 0.0f, 1.0f, c, 1.0f, 0.0f };
-    dst[2] = { x + x2, y + y2, 0.0f, 1.0f, c, 0.0f, 1.0f };
-
-    dst[3] = { x + x2, y + y2, 0.0f, 1.0f, c, 0.0f, 1.0f };
-    dst[4] = { x + x1, y + y1, 0.0f, 1.0f, c, 1.0f, 0.0f };
-    dst[5] = { x + x3, y + y3, 0.0f, 1.0f, c, 1.0f, 1.0f };
+    s_batchCountVerts = 0;
 }
+
+static void Batch_Flush()
+{
+    if (!g_pDevice || !s_batch || s_batchCountVerts <= 0)
+        return;
+
+    g_pDevice->SetVertexShader(FVF_2D_TEX);
+    g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLELIST, s_batchCountVerts / 3, s_batch, sizeof(Vtx));
+    s_batchCountVerts = 0;
+}
+
+static void Batch_End()
+{
+    Batch_Flush();
+}
+
+static __forceinline void EmitQuad6(float cx, float cy, float half, DWORD col)
+{
+    if (s_batchCountVerts + 6 > s_batchCapVerts)
+        Batch_Flush();
+
+    Vtx* v = s_batch + s_batchCountVerts;
+
+    float x0 = cx - half;
+    float y0 = cy - half;
+    float x1 = cx + half;
+    float y1 = cy + half;
+
+    v[0] = { x0, y0, 0.0f, 1.0f, col, 0.0f, 0.0f };
+    v[1] = { x1, y0, 0.0f, 1.0f, col, 1.0f, 0.0f };
+    v[2] = { x1, y1, 0.0f, 1.0f, col, 1.0f, 1.0f };
+
+    v[3] = { x0, y0, 0.0f, 1.0f, col, 0.0f, 0.0f };
+    v[4] = { x1, y1, 0.0f, 1.0f, col, 1.0f, 1.0f };
+    v[5] = { x0, y1, 0.0f, 1.0f, col, 0.0f, 1.0f };
+
+    s_batchCountVerts += 6;
+}
+
+// -----------------------------------------------------------------------------
+// Render states
+// -----------------------------------------------------------------------------
 
 static void SetupSpriteStates(LPDIRECT3DTEXTURE8 tex)
 {
     g_pDevice->SetTexture(0, tex);
     g_pDevice->SetVertexShader(FVF_2D_TEX);
 
-    g_pDevice->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
     g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
     g_pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    g_pDevice->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+    g_pDevice->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
 
     g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
     g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
@@ -414,7 +464,6 @@ static void SetupSpriteStates(LPDIRECT3DTEXTURE8 tex)
     g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
     g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
     g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
-
     g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
     g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
     g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
@@ -464,6 +513,29 @@ static DWORD TwinkleColor(DWORD baseARGB, unsigned add)
 
     return D3DCOLOR_ARGB(a, (BYTE)rr, (BYTE)gg, (BYTE)bb);
 }
+
+// -----------------------------------------------------------------------------
+// Star data
+// -----------------------------------------------------------------------------
+
+struct Star
+{
+    int   rPix;
+    int   ang;        // LUT angle base index
+    int   depth;      // 0..255
+    int   tw;         // 0..255
+    int   armDist;    // distance from arm center (0..)
+    int   sprRot;     // 0..SPR_ROT_MAX-1
+    int   spinStep;   // 1..8
+    float jx, jy;     // jitter in px
+    DWORD base;       // base ARGB (integer, init-only)
+};
+
+static Star* s_small = NULL;
+static Star* s_large = NULL;
+static Star* s_dust = NULL;
+static Star* s_nebula = NULL;
+static Star* s_disc = NULL;
 
 // -----------------------------------------------------------------------------
 // Init-only distribution with realistic galaxy colors
@@ -547,47 +619,30 @@ static void InitStars(Star* dst, int count, int isLarge)
         int arm = (int)(RngU32() % (unsigned)ARMS);
         int armBase = arm * (LUT_N / ARMS);
 
-        // Tighter, more consistent spread for defined arms
-        int spreadRange = SPREAD_MAX + RngRangeI(-5, 5);
-        int spread = RngRangeI(-spreadRange, spreadRange);
-
         int twist = (rPix * TWIST_MAX) / RMAX_PX;
-        if (arm & 1) twist = -twist;
+        int spread = (RngRangeI(-SPREAD_MAX, SPREAD_MAX));
+        int ang = (armBase + twist + spread) & (LUT_N - 1);
+        s.ang = ang;
 
-        int a = armBase + spread + twist;
-        a &= (LUT_N - 1);
-        s.ang = a;
+        // Arm distance metric (abs spread)
+        int ad = spread; if (ad < 0) ad = -ad;
+        s.armDist = ad;
 
-        s.arm = arm;
-
-        // Store distance from arm center for color determination
-        int armDist = spread;
-        if (armDist < 0) armDist = -armDist;
-
-        int jx = RngRangeI(-100, 100);
-        int jy = RngRangeI(-100, 100);
-
-        s.jx = (float)jx * 0.10f;
-        s.jy = (float)jy * 0.10f;
+        // jitter thickness (float only, no int conversion)
+        float jx = (float)RngRangeI(-10, 10) * 0.55f;
+        float jy = (float)RngRangeI(-10, 10) * 0.55f;
+        s.jx = jx;
+        s.jy = jy;
 
         s.sprRot = (int)(RngU32() & (SPR_ROT_MAX - 1));
-
-        s.spinDir = (RngU32() & 1u) ? 1 : -1;
         s.spinStep = 1 + (int)(RngU32() & 7u);
-        if (s.spinStep > 7) s.spinStep = 7;
 
-        int ax = RngRangeI(-35, 35);
-        int ay = RngRangeI(-35, 35);
-        s.ax = 1.0f + (float)ax * 0.004f;
-        s.ay = 1.0f + (float)ay * 0.004f;
-
-        s.base = PickBaseColorInt(rPix, armDist, isLarge);
+        s.base = PickBaseColorInt(rPix, ad, isLarge);
     }
 }
 
 static void InitDust(Star* dst, int count)
 {
-    // Dark dust lanes
     for (int i = 0; i < count; ++i)
     {
         Star& s = dst[i];
@@ -595,82 +650,34 @@ static void InitDust(Star* dst, int count)
         s.depth = (int)(RngU32() & 255u);
         s.tw = (int)(RngU32() & 255u);
 
-        int rPix = BiasedRadiusInt(RMAX_PX);
-        s.rPix = rPix;
-
-        int arm = (int)(RngU32() % (unsigned)ARMS);
-        int armBase = arm * (LUT_N / ARMS);
-
-        int spread = RngRangeI(-SPREAD_MAX, SPREAD_MAX);  // Tighter dust lanes
-        int twist = (rPix * (TWIST_MAX + 40)) / RMAX_PX;
-
-        int a = armBase + spread + twist;
-        a &= (LUT_N - 1);
-        s.ang = a;
-
-        int jx = RngRangeI(-150, 150);
-        int jy = RngRangeI(-150, 150);
-        s.jx = (float)jx * 0.12f;
-        s.jy = (float)jy * 0.12f;
-
-        s.sprRot = (int)(RngU32() & (SPR_ROT_MAX - 1));
-        s.ax = 1.0f;
-        s.ay = 1.0f;
-
-        s.spinDir = (RngU32() & 1u) ? 1 : -1;
-        s.spinStep = 1 + (int)(RngU32() & 7u);
-        if (s.spinStep > 7) s.spinStep = 7;
-
-        // Dark brown/gray dust
-        s.base = D3DCOLOR_ARGB(32, 40, 35, 30);
-    }
-}
-
-static void InitNebula(Star* dst, int count)
-{
-    // Pink/red nebula regions
-    for (int i = 0; i < count; ++i)
-    {
-        Star& s = dst[i];
-
-        s.depth = (int)(RngU32() & 255u);
-        s.tw = (int)(RngU32() & 255u);
-
-        // Nebulae mostly in arms
+        // dust lanes in arms mid radius
         int rPix = RCORE_PX + BiasedRadiusInt(RMAX_PX - RCORE_PX);
         s.rPix = rPix;
 
         int arm = (int)(RngU32() % (unsigned)ARMS);
         int armBase = arm * (LUT_N / ARMS);
 
-        int spread = RngRangeI(-SPREAD_MAX + 8, SPREAD_MAX - 8);  // Stay in arm centers
         int twist = (rPix * TWIST_MAX) / RMAX_PX;
+        int spread = (RngRangeI(-24, 24));
+        int ang = (armBase + twist + spread) & (LUT_N - 1);
+        s.ang = ang;
 
-        int a = armBase + spread + twist;
-        a &= (LUT_N - 1);
-        s.ang = a;
+        int ad = spread; if (ad < 0) ad = -ad;
+        s.armDist = ad;
 
-        int jx = RngRangeI(-80, 80);
-        int jy = RngRangeI(-80, 80);
-        s.jx = (float)jx * 0.08f;
-        s.jy = (float)jy * 0.08f;
+        s.jx = (float)RngRangeI(-16, 16) * 0.6f;
+        s.jy = (float)RngRangeI(-16, 16) * 0.6f;
 
         s.sprRot = (int)(RngU32() & (SPR_ROT_MAX - 1));
-        s.ax = 1.0f;
-        s.ay = 1.0f;
-
-        s.spinDir = (RngU32() & 1u) ? 1 : -1;
         s.spinStep = 1 + (int)(RngU32() & 7u);
 
-        // Pink/red nebula (brighter and more saturated)
-        s.base = D3DCOLOR_ARGB(52, 235, 120, 165);
+        // Very dark purple/blue dust; alpha low
+        s.base = D3DCOLOR_ARGB(52, 10, 8, 14);
     }
 }
 
-static void InitDisc(Star* dst, int count)
+static void InitNebula(Star* dst, int count)
 {
-    // Central disc - extends from core to mid-radius
-    // More concentrated than spiral arms, less than core bulge
     for (int i = 0; i < count; ++i)
     {
         Star& s = dst[i];
@@ -678,43 +685,72 @@ static void InitDisc(Star* dst, int count)
         s.depth = (int)(RngU32() & 255u);
         s.tw = (int)(RngU32() & 255u);
 
-        // Radius distribution: avoid mid-range where arms are strongest
-        unsigned pick = (RngU32() & 255u);
-        int rPix = 0;
-        if (pick < 180u)
-            rPix = RCORE_PX + BiasedRadiusInt(70);  // Inner disc
-        else if (pick < 220u)
-            rPix = 220 + BiasedRadiusInt(80);  // Skip mid, go to outer
-        else
-            rPix = 120 + BiasedRadiusInt(60);  // Fill gaps
-
+        // nebula in arms and slightly outer
+        int rPix = RCORE_PX + BiasedRadiusInt(RMAX_PX - RCORE_PX);
+        if (rPix < 120) rPix = 120 + (rPix % 40);
         s.rPix = rPix;
 
-        // Even angular distribution (no arm bias)
+        int arm = (int)(RngU32() % (unsigned)ARMS);
+        int armBase = arm * (LUT_N / ARMS);
+
+        int twist = (rPix * TWIST_MAX) / RMAX_PX;
+        int spread = (RngRangeI(-30, 30));
+        int ang = (armBase + twist + spread) & (LUT_N - 1);
+        s.ang = ang;
+
+        int ad = spread; if (ad < 0) ad = -ad;
+        s.armDist = ad;
+
+        s.jx = (float)RngRangeI(-22, 22) * 0.7f;
+        s.jy = (float)RngRangeI(-22, 22) * 0.7f;
+
+        s.sprRot = (int)(RngU32() & (SPR_ROT_MAX - 1));
+        s.spinStep = 1 + (int)(RngU32() & 7u);
+
+        // Pink/purple emission regions
+        BYTE a = 85;
+        BYTE r = 255, g = 95, b = 205;
+
+        // slight variation per armDist
+        if (ad < 12) { r = 255; g = 120; b = 220; a = 95; }
+        else if (ad > 24) { r = 185; g = 60; b = 255; a = 70; }
+
+        s.base = D3DCOLOR_ARGB(a, r, g, b);
+    }
+}
+
+static void InitDisc(Star* dst, int count)
+{
+    for (int i = 0; i < count; ++i)
+    {
+        Star& s = dst[i];
+
+        s.depth = (int)(RngU32() & 255u);
+        s.tw = (int)(RngU32() & 255u);
+
+        // DISC: smooth distribution, more in inner region, not tied to arms
+        int rPix = BiasedRadiusInt(RMAX_PX);
+        s.rPix = rPix;
+
         int a = (int)(RngU32() & (LUT_N - 1));
         s.ang = a;
 
-        // Moderate jitter - not too much, we want smooth blending
-        int jx = RngRangeI(-50, 50);
-        int jy = RngRangeI(-50, 50);
-        s.jx = (float)jx * 0.10f;
-        s.jy = (float)jy * 0.10f;
+        s.armDist = 0;
+
+        s.jx = (float)RngRangeI(-10, 10) * 0.9f;
+        s.jy = (float)RngRangeI(-10, 10) * 0.9f;
 
         s.sprRot = (int)(RngU32() & (SPR_ROT_MAX - 1));
-        s.ax = 1.0f;
-        s.ay = 1.0f;
-
-        s.spinDir = (RngU32() & 1u) ? 1 : -1;
         s.spinStep = 1 + (int)(RngU32() & 7u);
 
-        // Disc color: blue-white center, dimmer mid for arm contrast
-        BYTE a_val = 65;
-        BYTE r, g, b;
+        // Disc color: subtle warm white/yellow with radial falloff
+        BYTE r = 235, g = 235, b = 220;
+        BYTE a_val = 50;
 
-        if (rPix < 100)
+        if (rPix < 30)
         {
-            // Inner disc: cool blue-white (matches core better)
-            r = 235; g = 240; b = 250;
+            // Central glow: brighter but not blown out
+            r = 250; g = 245; b = 230;
             a_val = 85;
         }
         else if (rPix < 180)
@@ -751,6 +787,12 @@ struct Cam
     float roll;
 };
 
+static DWORD TimeMs()
+{
+    DWORD now = GetTickCount();
+    return now - s_startTicks;
+}
+
 static Cam BuildCamera(DWORD tMs, DWORD durMs)
 {
     float t = (durMs > 0) ? ((float)tMs / (float)durMs) : 0.0f;
@@ -779,20 +821,12 @@ static Cam BuildCamera(DWORD tMs, DWORD durMs)
 // Render star set
 // -----------------------------------------------------------------------------
 
-static void RenderStars(const Star* stars, int count, LPDIRECT3DTEXTURE8 tex, DWORD tMs, int isLarge)
+static void RenderStars(const Star* stars, int count, DWORD tMs, int isLarge,
+    const Cam& cam, float cr, float sr, int rot,
+    LayerStats& st)
 {
-    if (!stars || count <= 0 || !tex || !s_batch || s_batchCapVerts < (BATCH_QUADS * 6))
+    if (!stars || count <= 0 || !s_batch || s_batchCapVerts < (BATCH_QUADS * 6))
         return;
-
-    Cam cam = BuildCamera(tMs, SCENE_DURATION_MS);
-
-    float cr = cosf(cam.roll);
-    float sr = sinf(cam.roll);
-
-    int rot = (int)((tMs / 19) & (LUT_N - 1));
-
-    SetupSpriteStates(tex);
-
     int i = 0;
     while (i < count)
     {
@@ -820,79 +854,67 @@ static void RenderStars(const Star* stars, int count, LPDIRECT3DTEXTURE8 tex, DW
             float sx = cam.cx + rx * scale;
             float sy = cam.cy + ry * scale;
 
-            if (sx < -32.0f || sx >(SCREEN_W + 32.0f) ||
-                sy < -32.0f || sy >(SCREEN_H + 32.0f))
-                continue;
+            st.total++;
 
-            // Vary size by region - smaller core to reduce blowout
-            float size;
-            if (s.rPix < RCORE_PX)
-                size = isLarge ? 3.2f : 2.2f;  // Reduced core size
-            else if (s.rPix < 140)
-                size = isLarge ? 2.8f : 1.8f;
-            else if (s.rPix < 240)
-                size = isLarge ? 2.2f : 1.4f;
-            else
-                size = isLarge ? 1.8f : 1.1f;
+            const float CULL_PAD = 32.0f;
+            if (sx < -CULL_PAD || sx >(SCREEN_W + CULL_PAD) ||
+                sy < -CULL_PAD || sy >(SCREEN_H + CULL_PAD))
+            {
+                st.culled++;
+                continue;
+            }
+
+            unsigned sxScale = EdgeScale256_1D(sx, 0.0f, SCREEN_W);
+            unsigned syScale = EdgeScale256_1D(sy, 0.0f, SCREEN_H);
+            unsigned scale256 = MinU(sxScale, syScale);
+            if (scale256 == 0u)
+            {
+                st.culled++;
+                continue;
+            }
+
+            float size = isLarge ? 2.6f : 1.2f;
+
+            if (s.rPix < 60) size *= isLarge ? 1.0f : 1.05f;
+            else if (s.rPix > 280) size *= isLarge ? 0.82f : 0.90f;
 
             size *= (0.90f + (float)s.depth * (0.18f / 255.0f));
 
             unsigned tw = (unsigned)((s.tw + (int)((tMs / 16) & 255u)) & 255);
-            unsigned coreAdd = 0;
-
-            // Minimal core brightness (prevent white blowout)
-            if (s.rPix < RCORE_PX) coreAdd = 15;
-            else if (s.rPix < 100) coreAdd = 8;
-            else if (s.rPix < 180) coreAdd = 4;
-
-            unsigned add = tw + coreAdd;
-            if (add > 255u) add = 255u;
+            unsigned add = (tw >> 2); // 0..63
 
             DWORD col = TwinkleColor(s.base, add);
+            col = ApplyAlphaScale256(col, scale256);
+            if (((col >> 24) & 255u) < 6u) { st.culled++; continue; }
 
-            int spin = (int)((tMs / (31u + (unsigned)s.spinStep * 9u)) & 1023u);
-            if (s.spinDir < 0) spin = -spin;
 
-            int sprIdx = (s.sprRot << 4) + (spin & 1023);
-            sprIdx &= (LUT_N - 1);
+            out[0] = { sx - size, sy - size, 0.0f, 1.0f, col, 0.0f, 0.0f };
+            out[1] = { sx + size, sy - size, 0.0f, 1.0f, col, 1.0f, 0.0f };
+            out[2] = { sx + size, sy + size, 0.0f, 1.0f, col, 1.0f, 1.0f };
 
-            float sprCs = s_cos[sprIdx];
-            float sprSn = s_sin[sprIdx];
+            out[3] = { sx - size, sy - size, 0.0f, 1.0f, col, 0.0f, 0.0f };
+            out[4] = { sx + size, sy + size, 0.0f, 1.0f, col, 1.0f, 1.0f };
+            out[5] = { sx - size, sy + size, 0.0f, 1.0f, col, 0.0f, 1.0f };
 
-            float sxh = size * s.ax;
-            float syh = size * s.ay;
-
-            EmitQuad6(out, sx, sy, sxh, syh, sprCs, sprSn, col);
             out += 6;
             quadsThis++;
+            st.drawn++;
         }
 
         if (quadsThis > 0)
         {
-            g_pDevice->DrawPrimitiveUP(
-                D3DPT_TRIANGLELIST,
-                (quadsThis * 6) / 3,
-                s_batch,
-                sizeof(Vtx));
+            g_pDevice->SetVertexShader(FVF_2D_TEX);
+            g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLELIST, quadsThis * 2, s_batch, sizeof(Vtx));
         }
     }
-
-    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
-static void RenderDust(const Star* dust, int count, LPDIRECT3DTEXTURE8 tex, DWORD tMs)
+static void RenderDust(const Star* dust, int count, DWORD tMs,
+    const Cam& cam, float cr, float sr, int rot,
+    LayerStats& st)
 {
-    if (!dust || count <= 0 || !tex || !s_batch || s_batchCapVerts < (BATCH_QUADS * 6))
+    if (!dust || count <= 0 || !s_batch || s_batchCapVerts < (BATCH_QUADS * 6))
         return;
-
-    Cam cam = BuildCamera(tMs, SCENE_DURATION_MS);
-
-    float cr = cosf(cam.roll);
-    float sr = sinf(cam.roll);
-
-    int rot = (int)((tMs / 31) & (LUT_N - 1));
-
-    SetupSpriteStates(tex);
 
     int i = 0;
     while (i < count)
@@ -905,7 +927,6 @@ static void RenderDust(const Star* dust, int count, LPDIRECT3DTEXTURE8 tex, DWOR
             const Star& s = dust[i++];
 
             int a = (s.ang + rot) & (LUT_N - 1);
-
             float cs = s_cos[a];
             float sn = s_sin[a];
 
@@ -921,55 +942,61 @@ static void RenderDust(const Star* dust, int count, LPDIRECT3DTEXTURE8 tex, DWOR
             float sx = cam.cx + rx * scale;
             float sy = cam.cy + ry * scale;
 
-            if (sx < -80.0f || sx >(SCREEN_W + 80.0f) ||
-                sy < -80.0f || sy >(SCREEN_H + 80.0f))
+            st.total++;
+
+            const float CULL_PAD = 80.0f;
+            if (sx < -CULL_PAD || sx >(SCREEN_W + CULL_PAD) ||
+                sy < -CULL_PAD || sy >(SCREEN_H + CULL_PAD))
+            {
+                st.culled++;
                 continue;
+            }
+
+            unsigned sxScale = EdgeScale256_1D(sx, 0.0f, SCREEN_W);
+            unsigned syScale = EdgeScale256_1D(sy, 0.0f, SCREEN_H);
+            unsigned scale256 = MinU(sxScale, syScale);
+            if (scale256 == 0u)
+            {
+                st.culled++;
+                continue;
+            }
+
+            unsigned tw = (unsigned)((s.tw + (int)((tMs / 48) & 255u)) & 255);
+            unsigned add = (tw >> 3); // 0..31
+
+            DWORD col = TwinkleColor(s.base, add);
+            col = ApplyAlphaScale256(col, scale256);
 
             float k = (float)(s.depth & 31) * (1.0f / 31.0f);
             float size = DUST_SIZE_MIN + (DUST_SIZE_MAX - DUST_SIZE_MIN) * k;
 
-            unsigned tw = (unsigned)((s.tw + (int)((tMs / 48) & 255u)) & 255);
-            unsigned add = (tw >> 3);
+            out[0] = { sx - size, sy - size, 0.0f, 1.0f, col, 0.0f, 0.0f };
+            out[1] = { sx + size, sy - size, 0.0f, 1.0f, col, 1.0f, 0.0f };
+            out[2] = { sx + size, sy + size, 0.0f, 1.0f, col, 1.0f, 1.0f };
 
-            DWORD col = TwinkleColor(s.base, add);
+            out[3] = { sx - size, sy - size, 0.0f, 1.0f, col, 0.0f, 0.0f };
+            out[4] = { sx + size, sy + size, 0.0f, 1.0f, col, 1.0f, 1.0f };
+            out[5] = { sx - size, sy + size, 0.0f, 1.0f, col, 0.0f, 1.0f };
 
-            int sprA = (s.sprRot + ((tMs / 59) & (SPR_ROT_MAX - 1))) & (SPR_ROT_MAX - 1);
-            int sprIdx = (sprA << 4) & (LUT_N - 1);
-
-            float sprCs = s_cos[sprIdx];
-            float sprSn = s_sin[sprIdx];
-
-            EmitQuad6(out, sx, sy, size, size, sprCs, sprSn, col);
             out += 6;
             quadsThis++;
+            st.drawn++;
         }
 
         if (quadsThis > 0)
         {
-            g_pDevice->DrawPrimitiveUP(
-                D3DPT_TRIANGLELIST,
-                (quadsThis * 6) / 3,
-                s_batch,
-                sizeof(Vtx));
+            g_pDevice->SetVertexShader(FVF_2D_TEX);
+            g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLELIST, quadsThis * 2, s_batch, sizeof(Vtx));
         }
     }
-
-    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
-static void RenderNebula(const Star* nebula, int count, LPDIRECT3DTEXTURE8 tex, DWORD tMs)
+static void RenderNebula(const Star* nebula, int count, DWORD tMs,
+    const Cam& cam, float cr, float sr, int rot,
+    LayerStats& st)
 {
-    if (!nebula || count <= 0 || !tex || !s_batch || s_batchCapVerts < (BATCH_QUADS * 6))
+    if (!nebula || count <= 0 || !s_batch || s_batchCapVerts < (BATCH_QUADS * 6))
         return;
-
-    Cam cam = BuildCamera(tMs, SCENE_DURATION_MS);
-
-    float cr = cosf(cam.roll);
-    float sr = sinf(cam.roll);
-
-    int rot = (int)((tMs / 25) & (LUT_N - 1));
-
-    SetupSpriteStates(tex);
 
     int i = 0;
     while (i < count)
@@ -982,7 +1009,6 @@ static void RenderNebula(const Star* nebula, int count, LPDIRECT3DTEXTURE8 tex, 
             const Star& s = nebula[i++];
 
             int a = (s.ang + rot) & (LUT_N - 1);
-
             float cs = s_cos[a];
             float sn = s_sin[a];
 
@@ -998,54 +1024,61 @@ static void RenderNebula(const Star* nebula, int count, LPDIRECT3DTEXTURE8 tex, 
             float sx = cam.cx + rx * scale;
             float sy = cam.cy + ry * scale;
 
-            if (sx < -60.0f || sx >(SCREEN_W + 60.0f) ||
-                sy < -60.0f || sy >(SCREEN_H + 60.0f))
+            st.total++;
+
+            const float CULL_PAD = 60.0f;
+            if (sx < -CULL_PAD || sx >(SCREEN_W + CULL_PAD) ||
+                sy < -CULL_PAD || sy >(SCREEN_H + CULL_PAD))
+            {
+                st.culled++;
                 continue;
+            }
+
+            unsigned sxScale = EdgeScale256_1D(sx, 0.0f, SCREEN_W);
+            unsigned syScale = EdgeScale256_1D(sy, 0.0f, SCREEN_H);
+            unsigned scale256 = MinU(sxScale, syScale);
+            if (scale256 == 0u)
+            {
+                st.culled++;
+                continue;
+            }
+
+            unsigned tw = (unsigned)((s.tw + (int)((tMs / 35) & 255u)) & 255);
+            unsigned add = (tw >> 3); // 0..31
+
+            DWORD col = TwinkleColor(s.base, add);
+            col = ApplyAlphaScale256(col, scale256);
 
             float k = (float)(s.depth & 31) * (1.0f / 31.0f);
             float size = NEBULA_SIZE_MIN + (NEBULA_SIZE_MAX - NEBULA_SIZE_MIN) * k;
 
-            unsigned tw = (unsigned)((s.tw + (int)((tMs / 35) & 255u)) & 255);
-            unsigned add = (tw >> 2);
+            out[0] = { sx - size, sy - size, 0.0f, 1.0f, col, 0.0f, 0.0f };
+            out[1] = { sx + size, sy - size, 0.0f, 1.0f, col, 1.0f, 0.0f };
+            out[2] = { sx + size, sy + size, 0.0f, 1.0f, col, 1.0f, 1.0f };
 
-            DWORD col = TwinkleColor(s.base, add);
+            out[3] = { sx - size, sy - size, 0.0f, 1.0f, col, 0.0f, 0.0f };
+            out[4] = { sx + size, sy + size, 0.0f, 1.0f, col, 1.0f, 1.0f };
+            out[5] = { sx - size, sy + size, 0.0f, 1.0f, col, 0.0f, 1.0f };
 
-            int sprIdx = (s.sprRot << 3) & (LUT_N - 1);
-
-            float sprCs = s_cos[sprIdx];
-            float sprSn = s_sin[sprIdx];
-
-            EmitQuad6(out, sx, sy, size, size, sprCs, sprSn, col);
             out += 6;
             quadsThis++;
+            st.drawn++;
         }
 
         if (quadsThis > 0)
         {
-            g_pDevice->DrawPrimitiveUP(
-                D3DPT_TRIANGLELIST,
-                (quadsThis * 6) / 3,
-                s_batch,
-                sizeof(Vtx));
+            g_pDevice->SetVertexShader(FVF_2D_TEX);
+            g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLELIST, quadsThis * 2, s_batch, sizeof(Vtx));
         }
     }
-
-    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
-static void RenderDisc(const Star* disc, int count, LPDIRECT3DTEXTURE8 tex, DWORD tMs)
+static void RenderDisc(const Star* disc, int count, DWORD tMs,
+    const Cam& cam, float cr, float sr, int rot,
+    LayerStats& st)
 {
-    if (!disc || count <= 0 || !tex || !s_batch || s_batchCapVerts < (BATCH_QUADS * 6))
+    if (!disc || count <= 0 || !s_batch || s_batchCapVerts < (BATCH_QUADS * 6))
         return;
-
-    Cam cam = BuildCamera(tMs, SCENE_DURATION_MS);
-
-    float cr = cosf(cam.roll);
-    float sr = sinf(cam.roll);
-
-    int rot = (int)((tMs / 22) & (LUT_N - 1));
-
-    SetupSpriteStates(tex);
 
     int i = 0;
     while (i < count)
@@ -1058,7 +1091,6 @@ static void RenderDisc(const Star* disc, int count, LPDIRECT3DTEXTURE8 tex, DWOR
             const Star& s = disc[i++];
 
             int a = (s.ang + rot) & (LUT_N - 1);
-
             float cs = s_cos[a];
             float sn = s_sin[a];
 
@@ -1074,39 +1106,53 @@ static void RenderDisc(const Star* disc, int count, LPDIRECT3DTEXTURE8 tex, DWOR
             float sx = cam.cx + rx * scale;
             float sy = cam.cy + ry * scale;
 
-            if (sx < -40.0f || sx >(SCREEN_W + 40.0f) ||
-                sy < -40.0f || sy >(SCREEN_H + 40.0f))
+            st.total++;
+
+            const float CULL_PAD = 40.0f;
+            if (sx < -CULL_PAD || sx >(SCREEN_W + CULL_PAD) ||
+                sy < -CULL_PAD || sy >(SCREEN_H + CULL_PAD))
+            {
+                st.culled++;
                 continue;
+            }
+
+            unsigned sxScale = EdgeScale256_1D(sx, 0.0f, SCREEN_W);
+            unsigned syScale = EdgeScale256_1D(sy, 0.0f, SCREEN_H);
+            unsigned scale256 = MinU(sxScale, syScale);
+            if (scale256 == 0u)
+            {
+                st.culled++;
+                continue;
+            }
+
+            unsigned tw = (unsigned)((s.tw + (int)((tMs / 40) & 255u)) & 255);
+            unsigned add = (tw >> 3); // 0..31
+
+            DWORD col = TwinkleColor(s.base, add);
+            col = ApplyAlphaScale256(col, scale256);
 
             float k = (float)(s.depth & 31) * (1.0f / 31.0f);
             float size = DISC_SIZE_MIN + (DISC_SIZE_MAX - DISC_SIZE_MIN) * k;
 
-            unsigned tw = (unsigned)((s.tw + (int)((tMs / 40) & 255u)) & 255);
-            unsigned add = (tw >> 3);  // Very subtle twinkle for smooth disc
+            out[0] = { sx - size, sy - size, 0.0f, 1.0f, col, 0.0f, 0.0f };
+            out[1] = { sx + size, sy - size, 0.0f, 1.0f, col, 1.0f, 0.0f };
+            out[2] = { sx + size, sy + size, 0.0f, 1.0f, col, 1.0f, 1.0f };
 
-            DWORD col = TwinkleColor(s.base, add);
+            out[3] = { sx - size, sy - size, 0.0f, 1.0f, col, 0.0f, 0.0f };
+            out[4] = { sx + size, sy + size, 0.0f, 1.0f, col, 1.0f, 1.0f };
+            out[5] = { sx - size, sy + size, 0.0f, 1.0f, col, 0.0f, 1.0f };
 
-            int sprIdx = (s.sprRot << 3) & (LUT_N - 1);
-
-            float sprCs = s_cos[sprIdx];
-            float sprSn = s_sin[sprIdx];
-
-            EmitQuad6(out, sx, sy, size, size, sprCs, sprSn, col);
             out += 6;
             quadsThis++;
+            st.drawn++;
         }
 
         if (quadsThis > 0)
         {
-            g_pDevice->DrawPrimitiveUP(
-                D3DPT_TRIANGLELIST,
-                (quadsThis * 6) / 3,
-                s_batch,
-                sizeof(Vtx));
+            g_pDevice->SetVertexShader(FVF_2D_TEX);
+            g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLELIST, quadsThis * 2, s_batch, sizeof(Vtx));
         }
     }
-
-    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
 // -----------------------------------------------------------------------------
@@ -1180,38 +1226,48 @@ void GalaxyScene_Render(float)
     if (!s_texSprite || !s_small || !s_large || !s_dust || !s_nebula || !s_disc || !s_batch)
         return;
 
-    // Layer order for realistic look:
-    // 1) Dark dust lanes (obscures background)
-    // 2) Central disc (smooth background glow)
-    // 3) Small stars (dense background)
-    // 4) Pink nebulae (emission regions)
-    // 5) Large stars (bright foreground pops)
-    RenderDust(s_dust, DUST_COUNT, s_texSprite, tMs);
-    RenderDisc(s_disc, DISC_COUNT, s_texSprite, tMs);
-    RenderStars(s_small, STAR_SMALL_COUNT, s_texSprite, tMs, 0);
-    RenderNebula(s_nebula, NEBULA_COUNT, s_texSprite, tMs);
-    RenderStars(s_large, STAR_LARGE_COUNT, s_texSprite, tMs, 1);
+    // Per-frame stats
+    Stats_Reset(s_statDust);
+    Stats_Reset(s_statDisc);
+    Stats_Reset(s_statSmall);
+    Stats_Reset(s_statNeb);
+    Stats_Reset(s_statLarge);
 
-    // Stats overlay
+    Cam cam = BuildCamera(tMs, SCENE_DURATION_MS);
+    float cr = cosf(cam.roll);
+    float sr = sinf(cam.roll);
+
+    int rotStars = (int)((tMs / 19) & (LUT_N - 1));
+    int rotDust = (int)((tMs / 31) & (LUT_N - 1));
+    int rotNeb = (int)((tMs / 25) & (LUT_N - 1));
+    int rotDisc = (int)((tMs / 22) & (LUT_N - 1));
+
+    // One-time state bind
+    SetupSpriteStates(s_texSprite);
+
+    // Layer order: dust -> disc -> small stars -> nebula -> large stars
+    RenderDust(s_dust, DUST_COUNT, tMs, cam, cr, sr, rotDust, s_statDust);
+    RenderDisc(s_disc, DISC_COUNT, tMs, cam, cr, sr, rotDisc, s_statDisc);
+    RenderStars(s_small, STAR_SMALL_COUNT, tMs, 0, cam, cr, sr, rotStars, s_statSmall);
+    RenderNebula(s_nebula, NEBULA_COUNT, tMs, cam, cr, sr, rotNeb, s_statNeb);
+    RenderStars(s_large, STAR_LARGE_COUNT, tMs, 1, cam, cr, sr, rotStars, s_statLarge);
+
+    // Stats overlay (drawn counts reflect on-screen workload)
     g_pDevice->SetTexture(0, NULL);
     g_pDevice->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
     g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 
     char buf[64];
 
-    IntToStr(STAR_SMALL_COUNT + STAR_LARGE_COUNT, buf, sizeof(buf));
-    DrawText(10.0f, 10.0f, "STARS: ", 2.0f, D3DCOLOR_XRGB(200, 220, 255));
-    DrawText(120.0f, 10.0f, buf, 2.0f, D3DCOLOR_XRGB(200, 220, 255));
+    IntToStr(s_statSmall.drawn + s_statLarge.drawn, buf, sizeof(buf));
+    DrawText(10.0f, 10.0f, "STARS ON-SCREEN: ", 2.0f, D3DCOLOR_XRGB(200, 220, 255));
+    DrawText(250.0f, 10.0f, buf, 2.0f, D3DCOLOR_XRGB(200, 220, 255));
 
-    IntToStr(NEBULA_COUNT, buf, sizeof(buf));
-    DrawText(10.0f, 30.0f, "NEBULAE: ", 2.0f, D3DCOLOR_XRGB(255, 140, 200));
-    DrawText(160.0f, 30.0f, buf, 2.0f, D3DCOLOR_XRGB(255, 140, 200));
+    IntToStr(s_statNeb.drawn, buf, sizeof(buf));
+    DrawText(10.0f, 30.0f, "NEBULAE ON-SCREEN: ", 2.0f, D3DCOLOR_XRGB(255, 140, 200));
+    DrawText(280.0f, 30.0f, buf, 2.0f, D3DCOLOR_XRGB(255, 140, 200));
 
-    IntToStr(DUST_COUNT, buf, sizeof(buf));
-    DrawText(10.0f, 50.0f, "DUST: ", 2.0f, D3DCOLOR_XRGB(180, 170, 160));
-    DrawText(110.0f, 50.0f, buf, 2.0f, D3DCOLOR_XRGB(180, 170, 160));
-
-    IntToStr((int)(tMs / 1000), buf, sizeof(buf));
-    DrawText(10.0f, 70.0f, "TIME: ", 2.0f, D3DCOLOR_XRGB(140, 210, 255));
-    DrawText(110.0f, 70.0f, buf, 2.0f, D3DCOLOR_XRGB(140, 210, 255));
+    IntToStr(s_statDust.drawn, buf, sizeof(buf));
+    DrawText(10.0f, 50.0f, "DUST ON-SCREEN: ", 2.0f, D3DCOLOR_XRGB(180, 170, 160));
+    DrawText(230.0f, 50.0f, buf, 2.0f, D3DCOLOR_XRGB(180, 170, 160));
 }
