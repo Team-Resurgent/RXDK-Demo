@@ -381,7 +381,12 @@ void DripScene_Render()
     {
         int depth = y + 32;
         int scale = (256 * (GRID_H + 32)) / depth;
-        int sy = horizon + ((y * SCREEN_H) / (GRID_H - 1)); // Use full screen height
+        // 10% vertical overscan to prevent top-edge clipping/tearing when height lifts
+        const int OVERSCAN_NUM = 110;
+        const int OVERSCAN_DEN = 100;
+
+        int sy = horizon + ((y * (SCREEN_H * OVERSCAN_NUM / OVERSCAN_DEN)) / (GRID_H - 1));
+        sy -= (SCREEN_H * (OVERSCAN_NUM - OVERSCAN_DEN)) / (2 * OVERSCAN_DEN); // shift up by half overscan
 
         for (int x = 0; x < GRID_W; ++x)
         {
