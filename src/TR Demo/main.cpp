@@ -15,6 +15,7 @@
 #include "IntroScene.h"
 #include "PlasmaScene.h"
 #include "BallScene.h"
+#include "ChromeScene.h"
 #include "RingScene.h"
 #include "GalaxyScene.h"
 #include "UVRXDKScene.h"
@@ -24,6 +25,7 @@
 #include "CityScene.h"
 #include "DripScene.h"
 #include "MazeScene.h"
+#include "PostFXScene.h"
 #include "Credits.h"
 
 // -----------------------------------------------------------------------------
@@ -32,6 +34,7 @@
 
 LPDIRECT3D8        g_pD3D = nullptr;
 LPDIRECT3DDEVICE8  g_pDevice = nullptr;
+LPDIRECT3DDEVICE8  g_pd3dDevice = nullptr; // alias for legacy code compatibility
 
 static const float SCREEN_W = 640.0f;
 static const float SCREEN_H = 480.0f;
@@ -45,6 +48,7 @@ enum DemoSceneId
     SCENE_INTRO = 0,
     SCENE_PLASMA,
     SCENE_BALL,
+	SCENE_CHROME,
     SCENE_RING,
     SCENE_GALAXY,
     SCENE_UVRXDK,
@@ -52,6 +56,7 @@ enum DemoSceneId
     SCENE_CUBE,
     SCENE_DRIP,
     SCENE_MAZE,
+    SCENE_POSTFX,
     SCENE_CREDITS,
     SCENE_CITY,
     SCENE_COUNT
@@ -76,6 +81,7 @@ static DemoState g_demo = {};
 static const DWORD INTRO_SCENE_MS   = 30000;
 static const DWORD PLASMA_SCENE_MS  = 20000;
 static const DWORD BALL_SCENE_MS    = 25000;
+static const DWORD CHROME_SCENE_MS  = 25000;
 static const DWORD RING_SCENE_MS    = 20000;
 static const DWORD GALAXY_SCENE_MS  = 25000;
 static const DWORD UVRXDK_SCENE_MS  = 22000;
@@ -83,6 +89,7 @@ static const DWORD X_SCENE_MS       = 25000;
 static const DWORD CUBE_SCENE_MS    = 22000;
 static const DWORD DRIP_SCENE_MS    = 26000;
 static const DWORD MAZE_SCENE_MS    = 23000;
+static const DWORD POSTFX_SCENE_MS  = 22000;
 static const DWORD CITY_SCENE_MS    = 24000;
 static const DWORD CREDITS_SCENE_MS = 25000;
 
@@ -129,6 +136,8 @@ static long InitD3D()
         return -1;
     }
 
+	g_pd3dDevice = g_pDevice; // legacy alias
+
     g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
     g_pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
 
@@ -152,6 +161,8 @@ static void ShutdownD3D()
         g_pD3D->Release();
         g_pD3D = nullptr;
     }
+
+	g_pd3dDevice = nullptr;
 }
 
 // -----------------------------------------------------------------------------
@@ -172,6 +183,7 @@ static void InitScene(DemoSceneId id)
     case SCENE_INTRO:   IntroScene_Init();   break;
     case SCENE_PLASMA:  PlasmaScene_Init();  break;
     case SCENE_BALL:    BallScene_Init();    break;
+	case SCENE_CHROME:  ChromeScene_Init();  break;
     case SCENE_RING:    RingScene_Init();    break;
     case SCENE_GALAXY:  GalaxyScene_Init();  break;
     case SCENE_UVRXDK:  UVRXDKScene_Init();  break;
@@ -179,6 +191,7 @@ static void InitScene(DemoSceneId id)
     case SCENE_CUBE:    CubeScene_Init();    break;
     case SCENE_DRIP:    DripScene_Init();    break;
     case SCENE_MAZE:    MazeScene_Init();    break;
+	case SCENE_POSTFX:  PostFXScene_Init();  break;
     case SCENE_CREDITS: Credits_Init();      break;
     case SCENE_CITY:    CityScene_Init();    break;
     default: break;
@@ -192,6 +205,7 @@ static void ShutdownScene(DemoSceneId id)
     case SCENE_INTRO:   IntroScene_Shutdown();   break;
     case SCENE_PLASMA:  PlasmaScene_Shutdown();  break;
     case SCENE_BALL:    BallScene_Shutdown();    break;
+	case SCENE_CHROME:  ChromeScene_Shutdown();  break;
     case SCENE_RING:    RingScene_Shutdown();    break;
     case SCENE_GALAXY:  GalaxyScene_Shutdown();  break;
     case SCENE_UVRXDK:  UVRXDKScene_Shutdown();  break;
@@ -199,6 +213,7 @@ static void ShutdownScene(DemoSceneId id)
     case SCENE_CUBE:    CubeScene_Shutdown();    break;
     case SCENE_DRIP:    DripScene_Shutdown();    break;
     case SCENE_MAZE:    MazeScene_Shutdown();    break;
+	case SCENE_POSTFX:  PostFXScene_Shutdown();  break;
     case SCENE_CREDITS: Credits_Shutdown();      break;
     case SCENE_CITY:    CityScene_Shutdown();    break;
     default: break;
@@ -212,6 +227,7 @@ static void RenderScene(DemoSceneId id, float demoTime)
     case SCENE_INTRO:   IntroScene_Render(demoTime);   break;
     case SCENE_PLASMA:  PlasmaScene_Render(demoTime);  break;
     case SCENE_BALL:    BallScene_Render();            break;
+	case SCENE_CHROME:  ChromeScene_Render(demoTime);  break;
     case SCENE_RING:    RingScene_Render(demoTime);    break;
     case SCENE_GALAXY:  GalaxyScene_Render(demoTime);  break;
     case SCENE_UVRXDK:  UVRXDKScene_Render(demoTime);  break;
@@ -219,6 +235,7 @@ static void RenderScene(DemoSceneId id, float demoTime)
     case SCENE_CUBE:    CubeScene_Render(demoTime);    break;
     case SCENE_DRIP:    DripScene_Render();            break;
     case SCENE_MAZE:    MazeScene_Render();            break;
+	case SCENE_POSTFX:  PostFXScene_Render(demoTime);  break;
     case SCENE_CREDITS: Credits_Render(demoTime);      break;
     case SCENE_CITY:    CityScene_Render(demoTime);    break;
     default: break;
@@ -263,7 +280,7 @@ static void DrawFadeOverlay(int alpha)
     g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 
     // === FIX: overlay must NOT participate in depth ===
-    g_pDevice->SetRenderState(D3DRS_ZENABLE, FALSE);
+    g_pDevice->SetRenderState(D3DRS_ZENABLE, TRUE);
     g_pDevice->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
 
     g_pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
@@ -312,12 +329,14 @@ static DWORD SceneDurationMs(DemoSceneId id)
     case SCENE_INTRO:   return INTRO_SCENE_MS;
     case SCENE_PLASMA:  return PLASMA_SCENE_MS;
     case SCENE_RING:    return RING_SCENE_MS;
+	case SCENE_CHROME:  return CHROME_SCENE_MS;
     case SCENE_GALAXY:  return GALAXY_SCENE_MS;
     case SCENE_UVRXDK:  return UVRXDK_SCENE_MS;
     case SCENE_X:       return X_SCENE_MS;
     case SCENE_CUBE:    return CUBE_SCENE_MS;
     case SCENE_DRIP:    return DRIP_SCENE_MS;
     case SCENE_MAZE:    return MAZE_SCENE_MS;
+	case SCENE_POSTFX : return POSTFX_SCENE_MS;
     case SCENE_CREDITS: return CREDITS_SCENE_MS;
     case SCENE_CITY:    return CITY_SCENE_MS;
     default:            return 20000;
