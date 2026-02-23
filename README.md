@@ -20,6 +20,7 @@ the RXDK environment.
 - IntroScene - Opening title/logo sequence
 - PlasmaScene - Fullscreen animated plasma effect with swirling color patterns and camera drift
 - BallScene - Physics demo with bouncing balls featuring squash/stretch deformation and multiple materials (rubber, chrome, glass, plasma)
+- ChromeScene - A DXT1/DXT5 bump mapping sample with diffuse lighting and UV ripple
 - RingScene - Animated ring/torus geometry effects
 - GalaxyScene - Procedural space scene with stars, nebulae, and dust particles with stats overlay
 - UVRXDKScene - Large wireframe "RXDK" letters with music-reactive VU meter fills
@@ -28,6 +29,7 @@ the RXDK environment.
 - CityScene - Animated cityscape/skyline scene
 - DripScene - Interactive water ripple simulation with multi-layer shading, rain mode, and realistic physics
 - MazeScene - A cel shaded Windows 95 like maze
+- PostFXScene - Various PostFX samples such as lenswarping, vignette, heat warping, and a few other techniques to appear as a black hole 
 - Credits - Star Wars-style scrolling credits with perspective and color-coded shoutouts
 
 ## Constraints / Design Notes
