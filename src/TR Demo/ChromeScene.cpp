@@ -1,27 +1,17 @@
-// ChromeScene.cpp - RXDK/XDK DX8 fixed-function chrome showcase
+// ChromeScene.cpp — Deep Space Dark Chrome
+// RXDK / Original Xbox — DX8 fixed-function, 25 seconds, no shaders.
 //
 // Assets:
-//   D:\tex\chrome.dds       = environment/reflection map (used as emissive layer)
-//   D:\tex\chrome_diff.dds  = diffuse/albedo
-//   D:\tex\chrome_bmp.dds   = spec/gloss mask (additive highlight layer)
+//   D:\tex\chrome.dds      (DXT5) — tangent-space normal map
+//   D:\tex\chrome_diff.dds (DXT1) — diffuse albedo
+//   D:\tex\chrome_bmp.dds  (DXT1) — bump/specular mask
 //
-// Pipeline:
-//   DOT3 bump mapping against TFACTOR is dropped — it requires a per-vertex
-//   tangent basis transform that fixed-function cannot do with standard normal
-//   maps (tangent-space normals + world-space light = near-zero output = black).
-//
-//   Instead we use DX8 fixed-function lighting (D3DFVF_NORMAL is in the FVF
-//   so the hardware does diffuse + specular automatically) combined with a
-//   3-stage texture pipeline:
-//     Stage 0: diffuse map      (SELECTARG1 = TEXTURE, modulated by TFACTOR for tint)
-//     Stage 1: chrome/env map   (ADD — overlays reflective highlight)
-//     Stage 2: spec mask        (MODULATE2X — boosts bright areas of env map)
-//
-//   This gives controllable lit chrome with a strong specular feel without
-//   any tangent-space math.
-//
-//   Float->int: all conversions go through ClampByteFromFloat (inline asm
-//   fistp path) — no __ftol2_sse generated.
+// Techniques: per-vertex tangent-space DOT3 bump lighting with dual light
+// bake (warm primary + cold blue-purple fill) into vertex colour; animated
+// ripple via D3DTS_TEXTURE0 UV offset + rotation; camera-space reflection
+// mapping (D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR); additive specular and
+// rim light passes.  Float->int via inline asm fistp, no __ftol2_sse.
+
 
 #include "ChromeScene.h"
 
@@ -69,7 +59,9 @@ static LPDIRECT3DTEXTURE8 s_texChrome = nullptr;  // env/reflection layer
 static LPDIRECT3DTEXTURE8 s_texDiff = nullptr;  // diffuse albedo
 static LPDIRECT3DTEXTURE8 s_texMask = nullptr;  // spec/gloss mask
 
-static bool s_active = false;
+static bool  s_active = false;
+static float s_lastT = 0.f;
+static bool  s_hasLast = false;
 
 // -----------------------------------------------------------------------------
 // Mesh
@@ -326,31 +318,88 @@ static void SetLinear(int stage)
 
 static void UndoChromeState()
 {
-    g_pDevice->SetTexture(1, NULL);
-    g_pDevice->SetTexture(2, NULL);
-    g_pDevice->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-    g_pDevice->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-    g_pDevice->SetTextureStageState(2, D3DTSS_COLOROP, D3DTOP_DISABLE);
-    g_pDevice->SetTextureStageState(2, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+    // Full wipe of all 4 texture stages — not just 1 and 2.
+    // Previous scenes may leave dirty TEXCOORDINDEX, TEXTURETRANSFORMFLAGS,
+    // or stale textures in any slot.  This is the only safe cleanup.
+    D3DXMATRIX identTex;
+    D3DXMatrixIdentity(&identTex);
+    for (int si = 0; si < 4; ++si)
+    {
+        g_pDevice->SetTexture(si, NULL);
+        g_pDevice->SetTextureStageState(si, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        g_pDevice->SetTextureStageState(si, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        g_pDevice->SetTextureStageState(si, D3DTSS_TEXCOORDINDEX, si);
+        g_pDevice->SetTextureStageState(si, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+        g_pDevice->SetTransform(
+            (D3DTRANSFORMSTATETYPE)(D3DTS_TEXTURE0 + si), &identTex);
+    }
     g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+    g_pDevice->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+    g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
 }
 
 // -----------------------------------------------------------------------------
 // Public interface
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// Stepped loader — one asset per frame so disk I/O never spikes
+// -----------------------------------------------------------------------------
+// Load order:
+//   Step 0: CreateSphere (CPU only, no disk)
+//   Step 1: load chrome.dds      (disk)
+//   Step 2: load chrome_diff.dds (disk)
+//   Step 3: load chrome_bmp.dds  (disk)
+//   Step 4: done — s_active = true
+//
+// Render draws background + stars every frame regardless of load state.
+// Sphere draw is gated on s_active so it only appears once all assets exist.
+// Music_Update continues uninterrupted — only one texture load per frame.
+// -----------------------------------------------------------------------------
+static int s_loadStep = 0;
+
 void ChromeScene_Init()
 {
     if (!g_pDevice) return;
+
+    // Wipe all texture and render state inherited from previous scene
+    // before releasing or creating any resources.
+    UndoChromeState();
+
     ReleaseMesh();
     ReleaseTextures();
-
-    D3DXCreateTextureFromFileA(g_pDevice, "D:\\tex\\chrome.dds", &s_texChrome);
-    D3DXCreateTextureFromFileA(g_pDevice, "D:\\tex\\chrome_diff.dds", &s_texDiff);
-    D3DXCreateTextureFromFileA(g_pDevice, "D:\\tex\\chrome_bmp.dds", &s_texMask);
-
-    CreateSphere(1.0f, 64, 48);
     InitStars();
-    s_active = true;
+
+    s_active = false;  // not ready until all steps complete
+    s_loadStep = 0;
+    s_hasLast = false;
+}
+
+static void ChromeScene_StepLoad()
+{
+    switch (s_loadStep)
+    {
+    case 0:
+        CreateSphere(1.0f, 64, 48);
+        s_loadStep = 1;
+        break;
+    case 1:
+        D3DXCreateTextureFromFileA(g_pDevice, "D:\\tex\\chrome.dds", &s_texChrome);
+        s_loadStep = 2;
+        break;
+    case 2:
+        D3DXCreateTextureFromFileA(g_pDevice, "D:\\tex\\chrome_diff.dds", &s_texDiff);
+        s_loadStep = 3;
+        break;
+    case 3:
+        D3DXCreateTextureFromFileA(g_pDevice, "D:\\tex\\chrome_bmp.dds", &s_texMask);
+        s_loadStep = 4;
+        break;
+    case 4:
+        s_active = true;  // all assets present — enable 3D render
+        break;
+    default:
+        break;
+    }
 }
 
 void ChromeScene_Shutdown()
@@ -361,12 +410,12 @@ void ChromeScene_Shutdown()
     ReleaseTextures();
 }
 
-static float s_lastT = 0.f;
-static bool  s_hasLast = false;
-
 void ChromeScene_Render(float demoTime)
 {
-    if (!s_active || !g_pDevice || !s_vb || !s_ib) return;
+    if (!g_pDevice) return;
+
+    // Tick loader — one asset per frame until s_active becomes true
+    if (!s_active) ChromeScene_StepLoad();
 
     float t = demoTime;
     float dt = 0.016f;
@@ -385,7 +434,8 @@ void ChromeScene_Render(float demoTime)
     DrawStars(t);
     DrawLensGlow(t);
 
-    // ── Wipe all 2D state unconditionally ────────────────────────────────────
+    // 3D sphere — only once all assets have loaded
+    if (!s_active || !s_vb || !s_ib) return;
     g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
     g_pDevice->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
     g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
@@ -580,15 +630,6 @@ void ChromeScene_Render(float demoTime)
     g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
     g_pDevice->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
 
-    // Need lighting ON for reflection vector generation — but we want zero
-    // contribution from the light itself so we set a black material.
-    g_pDevice->SetRenderState(D3DRS_LIGHTING, TRUE);
-    g_pDevice->SetRenderState(D3DRS_AMBIENT, D3DCOLOR_XRGB(0, 0, 0));
-    D3DMATERIAL8 reflMat;
-    ZeroMemory(&reflMat, sizeof(reflMat));
-    reflMat.Diffuse.a = 1.f;  // black diffuse — light contributes nothing
-    g_pDevice->SetMaterial(&reflMat);
-
     // Reflection intensity: slow pulse so it feels alive, kept at ~45% max
     float reflPulse = 0.35f + 0.10f * sinf(t * 0.62f);
     BYTE  refI = ClampByteFromFloat(reflPulse * 255.f);
@@ -620,7 +661,6 @@ void ChromeScene_Render(float demoTime)
     // Restore TEXCOORDINDEX to default for subsequent passes
     g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
     g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
-    g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
 
     // ─────────────────────────────────────────────────────────────────────────
     // PASS 3 — Specular highlight  (additive, no Z write)

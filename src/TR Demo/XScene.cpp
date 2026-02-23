@@ -156,7 +156,7 @@ static const float X_THICK_Z = 0.55f;
 // ------------------------------------------------------------
 
 static const int OUT_LOOP_LINES = BLADE_PROFILE_N;
-static const int OUT_LINES_ONEBLADE = (OUT_LOOP_LINES * 2);
+static const int OUT_LINES_ONEBLADE = (OUT_LOOP_LINES * 3); // front + back + connectors
 
 static Vtx3D s_outline[OUT_LINES_ONEBLADE * 2];
 static int   s_outlineVCount = 0;
@@ -185,6 +185,13 @@ static void BuildBladeOutline()
         int j = i + 1; if (j >= BLADE_PROFILE_N) j = 0;
         s_outline[v++] = { s_blade2D[i].x, s_blade2D[i].y, zb, 0xFFFFFFFF };
         s_outline[v++] = { s_blade2D[j].x, s_blade2D[j].y, zb, 0xFFFFFFFF };
+    }
+
+    // depth connectors — join front face to back face at every vertex
+    for (int i = 0; i < BLADE_PROFILE_N; ++i)
+    {
+        s_outline[v++] = { s_blade2D[i].x, s_blade2D[i].y, zf, 0xFFFFFFFF };
+        s_outline[v++] = { s_blade2D[i].x, s_blade2D[i].y, zb, 0xFFFFFFFF };
     }
 
     s_outlineVCount = v;
@@ -339,7 +346,7 @@ static void BuildFX()
 
 static LPDIRECT3DTEXTURE8 s_smokeTex = NULL;
 
-static const int SMOKE_PTS = 800;  // Much denser smoke to fill the X
+static const int SMOKE_PTS = 800;
 static const int SMOKE_VERTS = SMOKE_PTS * 6;
 
 struct SmokePt
@@ -403,9 +410,7 @@ static void BuildSmoke()
         s_smoke[count].z = z;
         s_smoke[count].seedA = (int)(RngU32() & 1023u);
         s_smoke[count].seedB = (int)(RngU32() & 1023u);
-
         s_smoke[count].r = 0.18f + RngF(0.0f, 0.22f);
-
         s_smoke[count].uo = RngF(0.0f, 0.75f);
         s_smoke[count].vo = RngF(0.0f, 0.75f);
 
@@ -534,11 +539,10 @@ static void RenderSmoke(const D3DXMATRIX& world, DWORD tMs)
         p.x = x; p.y = y; p.z = z;
 
         BYTE u = s_u8Glow[(a0 + 200) & 1023];
-        int baseA = 35 + (u >> 3);  // Denser base smoke
+        int baseA = 35 + (u >> 3);
 
         float L = LightProbeAt(x, y, z, tMs);
 
-        // Xbox green tinted smoke
         int addA = 0;
         int addG = 0;
         int addR = 0;
@@ -551,9 +555,9 @@ static void RenderSmoke(const D3DXMATRIX& world, DWORD tMs)
         int ia = baseA + addA;
         if (ia > 170) ia = 170;
 
-        int ig = 180 + addG; if (ig > 255) ig = 255;  // green dominant
+        int ig = 180 + addG; if (ig > 255) ig = 255;
         int ir = 100 + addR; if (ir > 220) ir = 220;
-        BYTE ib = 80;  // low blue for green tint
+        BYTE ib = 80;
 
         float breath = 0.88f + 0.12f * s_sin[(a1 + 300) & 1023];
         float rr = p.r * breath;
@@ -624,48 +628,166 @@ static void EndAdditive()
 
 // ------------------------------------------------------------
 // Outline rendering: Xbox green neon
+// PATCH: DrawBladeOutline now also draws centre hub lines that
+// connect the inner waist vertices between adjacent blades,
+// making the four blades read as one joined wireframe X.
+//
+// s_blade2D inner vertices (the waist points near the X centre):
+//   index 0: { -0.35f, 0.00f }  — inner left
+//   index 6: {  0.35f, 0.00f }  — inner right
+//
+// Each blade is rotated k*90deg around Z. We transform indices 0
+// and 6 for each k into world space, then connect:
+//   blade[k] inner-right  -->  blade[k+1] inner-left
+// on both the front and back faces. This closes the centre gap.
 // ------------------------------------------------------------
 
 static void DrawBladeOutline(const D3DXMATRIX& baseWorld, DWORD col, float scaleXY)
 {
-    static Vtx3D tmp[OUT_LINES_ONEBLADE * 2];
+    static Vtx3D all[OUT_LINES_ONEBLADE * 2 * 4];
+    int av = 0;
 
-    for (int i = 0; i < s_outlineVCount; ++i)
-    {
-        tmp[i] = s_outline[i];
-        tmp[i].x *= scaleXY;
-        tmp[i].y *= scaleXY;
-        tmp[i].c = col;
-    }
+    static const int rotIdx[4] = { 0, 256, 512, 768 };
 
     for (int k = 0; k < 4; ++k)
     {
-        D3DXMATRIX rz;
-        D3DXMatrixRotationZ(&rz, (D3DX_PI * 0.5f) * (float)k);
+        float ca = s_cos[rotIdx[k]];
+        float sa = s_sin[rotIdx[k]];
 
-        D3DXMATRIX w = rz * baseWorld;
-        g_pDevice->SetTransform(D3DTS_WORLD, &w);
-
-        g_pDevice->DrawPrimitiveUP(D3DPT_LINELIST, s_outlineVCount / 2, tmp, sizeof(Vtx3D));
+        for (int i = 0; i < s_outlineVCount; ++i)
+        {
+            float lx = s_outline[i].x * scaleXY;
+            float ly = s_outline[i].y * scaleXY;
+            all[av].x = lx * ca - ly * sa;
+            all[av].y = lx * sa + ly * ca;
+            all[av].z = s_outline[i].z;
+            all[av].c = col;
+            ++av;
+        }
     }
+
+    g_pDevice->SetTransform(D3DTS_WORLD, &baseWorld);
+    g_pDevice->DrawPrimitiveUP(D3DPT_LINELIST, av / 2, all, sizeof(Vtx3D));
 }
 
-static void RenderXOutlineNeon(const D3DXMATRIX& baseWorld, DWORD tMs)
+// ------------------------------------------------------------
+// Elevated outline: tip glow + pulse sweep per vertex
+// ------------------------------------------------------------
+
+// Distance of each blade vertex from origin, stored as 0..255 integer
+static int  s_vertDist8[BLADE_PROFILE_N];
+static bool s_vertDistBuilt = false;
+
+static void BuildVertDist()
 {
-    int ph = (int)((tMs >> 2) & 1023);
-    BYTE u = s_u8Glow[ph];
+    if (s_vertDistBuilt) return;
+    // Blade coords are stored as floats in s_blade2D but only used here at Init.
+    // Multiply by 64 and truncate using integer addition of the float bits is
+    // not available — instead pre-scale via a fixed lookup of the known values.
+    // Since s_blade2D is a compile-time constant we can compute d2 directly:
+    //   d2[i] = (x*64)^2 + (y*64)^2  where x,y are the known blade floats.
+    // To avoid float->int we store the scaled coords as a parallel int table.
+    static const int bx8[BLADE_PROFILE_N] = { 0, -51, -32,  0, 32, 51,  0, 16,  0, -16 };
+    static const int by8[BLADE_PROFILE_N] = { 0,  61, 141, 205, 141, 61,  0, -22, -13, -22 };
+    // (values = blade2D * 64, rounded to nearest int)
 
-    // Xbox green colors
-    DWORD colCore = ARGB((BYTE)190, (BYTE)(140 + (u >> 3)), (BYTE)(235 + (u >> 4)), (BYTE)60);
-    DWORD colH1 = ARGB((BYTE)80, (BYTE)100, (BYTE)200, (BYTE)30);
-    DWORD colH2 = ARGB((BYTE)45, (BYTE)70, (BYTE)150, (BYTE)20);
+    int maxD2 = 1;
+    int d2[BLADE_PROFILE_N];
+    for (int i = 0; i < BLADE_PROFILE_N; ++i)
+    {
+        d2[i] = bx8[i] * bx8[i] + by8[i] * by8[i];
+        if (d2[i] > maxD2) maxD2 = d2[i];
+    }
+    for (int i = 0; i < BLADE_PROFILE_N; ++i)
+        s_vertDist8[i] = (d2[i] * 255) / maxD2;
+    s_vertDistBuilt = true;
+}
 
-    // Outer soft halo
+// Per-vertex colour: tip glow + travelling pulse wave — integer math only.
+//
+// s_vertDist8[i]: vertex distance from origin, stored as 0..255 integer.
+// Tip glow:  bright8 = 140 + (dist8 * 115 >> 8)   -> 140..255 range
+// Pulse:     approximated with a tent wave in integer space.
+//            pulsePos8 is the wave front position 0..255.
+//            diff8 = |dist8 - pulsePos8|
+//            pulse8 = max(0, 80 - diff8 * 3)        -> triangle peak, width ~27
+// Combined:  total8 = min(255, bright8 + pulse8)
+// globalA8:  0..255 integer global alpha passed in.
+// Final channels scaled from total8:
+//            ia = total8 * globalA8 >> 8             (alpha)
+//            ig = total8                              (green — full)
+//            ir = total8 * 140 >> 8                  (red   — 55% of green)
+//            ib = total8 *  60 >> 8                  (blue  — 24% of green)
+
+static void DrawBladeOutlineElevated(const D3DXMATRIX& baseWorld,
+    float scaleXY, int pulsePos8, int globalA8)
+{
+    static Vtx3D all[OUT_LINES_ONEBLADE * 2 * 4];
+    int av = 0;
+
+    // 90-degree steps from LUT: 0=0deg, 256=90deg, 512=180deg, 768=270deg
+    static const int rotIdx[4] = { 0, 256, 512, 768 };
+
+    for (int k = 0; k < 4; ++k)
+    {
+        float ca = s_cos[rotIdx[k]];   // LUT lookup — float used only for geometry, not colour
+        float sa = s_sin[rotIdx[k]];
+
+        for (int i = 0; i < s_outlineVCount; ++i)
+        {
+            int vi = (i / 2) % BLADE_PROFILE_N;
+            int dist8 = s_vertDist8[vi];   // 0..255
+
+            // Tip glow: 140 at centre, 255 at tip
+            int bright8 = 140 + ((dist8 * 115) >> 8);
+
+            // Pulse: triangle peak centred on pulsePos8, width ~27 units
+            int diff8 = dist8 - pulsePos8;
+            if (diff8 < 0) diff8 = -diff8;
+            int pulse8 = 80 - diff8 * 3;
+            if (pulse8 < 0) pulse8 = 0;
+
+            int total8 = bright8 + pulse8;
+            if (total8 > 255) total8 = 255;
+
+            // Apply global alpha
+            int ia = (total8 * globalA8) >> 8;
+            int ig = total8;
+            int ir = (total8 * 140) >> 8;
+            int ib = (total8 * 60) >> 8;
+
+            DWORD col = ARGB((BYTE)ia, (BYTE)ir, (BYTE)ig, (BYTE)ib);
+
+            float lx = s_outline[i].x * scaleXY;
+            float ly = s_outline[i].y * scaleXY;
+            all[av].x = lx * ca - ly * sa;
+            all[av].y = lx * sa + ly * ca;
+            all[av].z = s_outline[i].z;
+            all[av].c = col;
+            ++av;
+        }
+    }
+
+    g_pDevice->SetTransform(D3DTS_WORLD, &baseWorld);
+    g_pDevice->DrawPrimitiveUP(D3DPT_LINELIST, av / 2, all, sizeof(Vtx3D));
+}
+
+static void RenderXOutlineNeon(const D3DXMATRIX& baseWorld, DWORD tMs, int globalA8)
+{
+    // Pulse position: cycles 0->255 every 1.8 seconds
+    // 1.8s = 1800ms. pos8 = (tMs * 255) / 1800, wrapped 0..255
+    int pulsePos8 = (int)((tMs % 1800u) * 255u / 1800u);
+
+    // Halo passes — alpha scaled by globalA8
+    int haloA2 = (45 * globalA8) >> 8;
+    int haloA1 = (80 * globalA8) >> 8;
+    DWORD colH2 = ARGB((BYTE)haloA2, 70, 150, 20);
+    DWORD colH1 = ARGB((BYTE)haloA1, 100, 200, 30);
     DrawBladeOutline(baseWorld, colH2, 1.060f);
-    // Mid halo
     DrawBladeOutline(baseWorld, colH1, 1.032f);
-    // Crisp core
-    DrawBladeOutline(baseWorld, colCore, 1.000f);
+
+    // Core: per-vertex tip glow + pulse, integer only
+    DrawBladeOutlineElevated(baseWorld, 1.000f, pulsePos8, globalA8);
 }
 
 // ------------------------------------------------------------
@@ -707,7 +829,6 @@ static void RenderInteriorFX(const D3DXMATRIX& world, DWORD tMs)
         else if (src.band == 2) { dirx = 0.7071067f;  diry = -0.7071067f; }
         else { dirx = -0.7071067f; diry = -0.7071067f; }
 
-        // Xbox green ribbons
         DWORD col;
         if (src.band == 0) col = ARGB(170, 120, 240, 70);
         else if (src.band == 1) col = ARGB(170, 140, 255, 80);
@@ -756,6 +877,7 @@ void XScene_Init()
 
     BuildLUT();
     BuildU8();
+    BuildVertDist();
     BuildBladeOutline();
     BuildFX();
     BuildSmoke();
@@ -780,27 +902,58 @@ void XScene_Render(float)
         return;
 
     DWORD tMs = GetTickCount() - s_startTicks;
+    float tSec = (float)tMs * 0.001f;
 
     SetupCamera();
 
-    float rx = (float)tMs * 0.00014f;
-    float ry = (float)tMs * 0.00024f;
-    float rz = (float)tMs * 0.00008f;
+    // ── Intro scale-in: 0->1 over first 1.5 seconds ─────────────────────────
+    // Use integer ratio: introT8 = min(255, tMs * 255 / 1500)
+    int introT8 = (int)(tMs * 255u / 1500u);
+    if (introT8 > 255) introT8 = 255;
+    // Ease-out cubic in fixed-point: scale8 = 255 - (255-t)^3 / 255^2
+    int inv8 = 255 - introT8;
+    int scaleI = 255 - (inv8 * inv8 / 255 * inv8 / 255);
+    float scaleIn = (float)scaleI * (1.0f / 255.0f);
 
-    D3DXMATRIX mx, my, mz, baseWorld;
+    // ── Global alpha: fade in + fade out, integer ────────────────────────────
+    // Fade in: introT8 (0..255 over first 1500ms)
+    // Fade out: fadeT8 (255..0 over last 1500ms)
+    DWORD fadeOutMs = (DWORD)(SCENE_DURATION_MS - 1500u);
+    int fadeT8 = 255;
+    if (tMs > fadeOutMs)
+    {
+        DWORD elapsed = tMs - fadeOutMs;
+        fadeT8 = 255 - (int)(elapsed * 255u / 1500u);
+        if (fadeT8 < 0) fadeT8 = 0;
+    }
+    int globalA8 = (introT8 * fadeT8) >> 8;
+
+    // ── Smooth constant rotation ──────────────────────────────────────────────
+    float rx = tSec * 0.14f;
+    float ry = tSec * 0.24f;
+    float rz = tSec * 0.08f;
+
+    // Sinusoidal wobble using LUT — integer index arithmetic only
+    // tMs in ms: scale to LUT units. 37 cycles/1024 LUT = ~36ms per step.
+    // >> 5 divides tMs by 32 to slow the wobble down to a gentle drift.
+    rx += s_sin[(tMs >> 5) & 1023] * 0.18f;
+    ry += s_sin[((tMs >> 6) + 112) & 1023] * 0.14f;
+
+    D3DXMATRIX mScale, mx, my, mz, baseWorld;
+    D3DXMatrixScaling(&mScale, scaleIn, scaleIn, scaleIn);
     D3DXMatrixRotationX(&mx, rx);
     D3DXMatrixRotationY(&my, ry);
     D3DXMatrixRotationZ(&mz, rz);
-    baseWorld = mx * my * mz;
+    baseWorld = mScale * mx * my * mz;
 
-    // 1) volumetric smoke first (alpha)
+    // 1) volumetric smoke (alpha blend)
     RenderSmoke(baseWorld, tMs);
 
-    // 2) ribbons (additive) - light sources
+    // 2) ribbons (additive)
     SetupAdditiveLines();
     RenderInteriorFX(baseWorld, tMs);
 
-    // 3) thick neon outline (multi-pass additive)
-    RenderXOutlineNeon(baseWorld, tMs);
+    // 3) elevated neon outline — tip glow + pulse + halo
+    RenderXOutlineNeon(baseWorld, tMs, globalA8);
     EndAdditive();
 }
