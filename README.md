@@ -26,6 +26,7 @@ the RXDK environment.
 - UVRXDKScene - Large wireframe "RXDK" letters with music-reactive VU meter fills
 - XScene - Xbox logo visualization
 - CubeScene - Spinning cube with Matrix-style "RXDK" text rain on all 6 faces
+- CubeEnvScene - A spinning environment mapped cube featuring 6 unique enviroments and showcasing reflections
 - CityScene - Animated cityscape/skyline scene
 - DripScene - Interactive water ripple simulation with multi-layer shading, rain mode, and realistic physics
 - MazeScene - A cel shaded Windows 95 like maze
