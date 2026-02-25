@@ -22,7 +22,6 @@
 #include "XScene.h"
 
 #include "CubeScene.h"
-#include "CubeEnvScene.h"
 #include "CityScene.h"
 #include "DripScene.h"
 #include "MazeScene.h"
@@ -55,7 +54,6 @@ enum DemoSceneId
     SCENE_UVRXDK,
     SCENE_X,
     SCENE_CUBE,
-	SCENE_CUBE_ENV,
     SCENE_DRIP,
     SCENE_MAZE,
     SCENE_POSTFX,
@@ -89,7 +87,6 @@ static const DWORD GALAXY_SCENE_MS  = 25000;
 static const DWORD UVRXDK_SCENE_MS  = 22000;
 static const DWORD X_SCENE_MS       = 25000;
 static const DWORD CUBE_SCENE_MS    = 22000;
-static const DWORD CUBE_ENV_SCENE_MS = 24000;
 static const DWORD DRIP_SCENE_MS    = 26000;
 static const DWORD MAZE_SCENE_MS    = 23000;
 static const DWORD POSTFX_SCENE_MS  = 22000;
@@ -192,7 +189,6 @@ static void InitScene(DemoSceneId id)
     case SCENE_UVRXDK:  UVRXDKScene_Init();  break;
     case SCENE_X:       XScene_Init();       break;
     case SCENE_CUBE:    CubeScene_Init();    break;
-	case SCENE_CUBE_ENV: CubeEnvScene_Init(); break;
     case SCENE_DRIP:    DripScene_Init();    break;
     case SCENE_MAZE:    MazeScene_Init();    break;
 	case SCENE_POSTFX:  PostFXScene_Init();  break;
@@ -215,7 +211,6 @@ static void ShutdownScene(DemoSceneId id)
     case SCENE_UVRXDK:  UVRXDKScene_Shutdown();  break;
     case SCENE_X:       XScene_Shutdown();       break;
     case SCENE_CUBE:    CubeScene_Shutdown();    break;
-	case SCENE_CUBE_ENV: CubeEnvScene_Shutdown(); break;
     case SCENE_DRIP:    DripScene_Shutdown();    break;
     case SCENE_MAZE:    MazeScene_Shutdown();    break;
 	case SCENE_POSTFX:  PostFXScene_Shutdown();  break;
@@ -238,7 +233,6 @@ static void RenderScene(DemoSceneId id, float demoTime)
     case SCENE_UVRXDK:  UVRXDKScene_Render(demoTime);  break;
     case SCENE_X:       XScene_Render(demoTime);       break;
     case SCENE_CUBE:    CubeScene_Render(demoTime);    break;
-	case SCENE_CUBE_ENV: CubeEnvScene_Render(demoTime); break;
     case SCENE_DRIP:    DripScene_Render();            break;
     case SCENE_MAZE:    MazeScene_Render();            break;
 	case SCENE_POSTFX:  PostFXScene_Render(demoTime);  break;
@@ -340,7 +334,6 @@ static DWORD SceneDurationMs(DemoSceneId id)
     case SCENE_UVRXDK:  return UVRXDK_SCENE_MS;
     case SCENE_X:       return X_SCENE_MS;
     case SCENE_CUBE:    return CUBE_SCENE_MS;
-	case SCENE_CUBE_ENV: return CUBE_ENV_SCENE_MS;
     case SCENE_DRIP:    return DRIP_SCENE_MS;
     case SCENE_MAZE:    return MAZE_SCENE_MS;
 	case SCENE_POSTFX : return POSTFX_SCENE_MS;
