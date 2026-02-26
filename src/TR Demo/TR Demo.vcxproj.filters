@@ -72,6 +72,15 @@
     <ClCompile Include="MazeScene.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CubeEnvScene.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ChromeScene.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PostFXScene.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Text Include="Media\Copy Assets Here.txt">
@@ -124,6 +133,15 @@
     <ClInclude Include="MazeScene.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CubeEnvScene.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ChromeScene.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PostFXScene.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Image Include="Media\galaxy\cloud_256.dds">
@@ -136,6 +154,33 @@
       <Filter>Media\tex</Filter>
     </Image>
     <Image Include="Media\xbs.dds">
+      <Filter>Media\tex</Filter>
+    </Image>
+    <Image Include="Media\tex\chrome.dds">
+      <Filter>Media\tex</Filter>
+    </Image>
+    <Image Include="Media\tex\chrome_bmp.dds">
+      <Filter>Media\tex</Filter>
+    </Image>
+    <Image Include="Media\tex\chrome_diff.dds">
+      <Filter>Media\tex</Filter>
+    </Image>
+    <Image Include="Media\tex\cube_face0.dds">
+      <Filter>Media\tex</Filter>
+    </Image>
+    <Image Include="Media\tex\cube_face1.dds">
+      <Filter>Media\tex</Filter>
+    </Image>
+    <Image Include="Media\tex\cube_face2.dds">
+      <Filter>Media\tex</Filter>
+    </Image>
+    <Image Include="Media\tex\cube_face3.dds">
+      <Filter>Media\tex</Filter>
+    </Image>
+    <Image Include="Media\tex\cube_face4.dds">
+      <Filter>Media\tex</Filter>
+    </Image>
+    <Image Include="Media\tex\cube_face5.dds">
       <Filter>Media\tex</Filter>
     </Image>
   </ItemGroup>

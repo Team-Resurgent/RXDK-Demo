@@ -391,6 +391,44 @@ void IntroScene_Shutdown()
     }
 }
 
+
+static void IntroScene_EndFrameStateCleanup()
+{
+    if (!g_pDevice) return;
+
+    // Clear textures + disable combiners on all stages
+    for (int si = 0; si < 4; ++si)
+    {
+        g_pDevice->SetTexture(si, NULL);
+
+        g_pDevice->SetTextureStageState(si, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        g_pDevice->SetTextureStageState(si, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+
+        // Normalize coord gen + transforms (critical for Chrome DOT3/reflection)
+        g_pDevice->SetTextureStageState(si, D3DTSS_TEXCOORDINDEX, 0);
+        g_pDevice->SetTextureStageState(si, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+
+        // Normalize sampler filters (Intro uses POINT/NONE)
+        g_pDevice->SetTextureStageState(si, D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+        g_pDevice->SetTextureStageState(si, D3DTSS_MINFILTER, D3DTEXF_LINEAR);
+        g_pDevice->SetTextureStageState(si, D3DTSS_MIPFILTER, D3DTEXF_LINEAR);
+    }
+
+    // Normalize blend/depth/cull
+    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+    g_pDevice->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+    g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
+    g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ZERO);
+
+    g_pDevice->SetRenderState(D3DRS_ZENABLE, TRUE);
+    g_pDevice->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+
+    g_pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_CCW);
+    g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
+
+    g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(255, 255, 255));
+}
+
 void IntroScene_Render(float demoTime)
 {
     (void)demoTime; // timing is frame-based, we ignore demoTime to avoid float->int
@@ -402,36 +440,32 @@ void IntroScene_Render(float demoTime)
     s_frameCount++;
     s_phaseFrame++;
 
-    // Caller is responsible for Clear() / BeginScene() / EndScene() / Present()
-
     // Background gradient always present
     DrawFullscreenGradient();
 
     if (s_phase == PHASE_DONE)
+    {
+        IntroScene_EndFrameStateCleanup();
         return;
+    }
 
     // Assuming ~60fps. Convert desired seconds to frames:
-    // Presented: 0.7 in, 1.0 hold, 0.7 out
     const int PRESENTED_IN = 42;
     const int PRESENTED_HOLD = 60;
     const int PRESENTED_OUT = 42;
 
-    // Darkone: 0.7 in, 2.0 hold, 0.7 out
     const int DARK_IN = 42;
     const int DARK_HOLD = 120;
     const int DARK_OUT = 42;
 
-    // Logo: 1.0 in, 8.0 hold, 1.0 out
     const int LOGO_IN = 60;
     const int LOGO_HOLD = 480;
     const int LOGO_OUT = 60;
 
-    // Music By: 0.7 in, 1.5 hold, 0.7 out
     const int MUSIC_IN = 42;
     const int MUSIC_HOLD = 90;
     const int MUSIC_OUT = 42;
 
-    // Support: 0.7 in, 4.0 hold, 0.7 out
     const int SUPPORT_IN = 42;
     const int SUPPORT_HOLD = 240;
     const int SUPPORT_OUT = 42;
@@ -445,7 +479,6 @@ void IntroScene_Render(float demoTime)
         fade = ComputeFadeAlphaInt(s_phaseFrame, PRESENTED_IN, PRESENTED_HOLD, PRESENTED_OUT);
         if (fade > 0)
         {
-            // Text fade = brightness fade (full alpha for font)
             col = D3DCOLOR_ARGB(255, fade, fade, fade);
             DrawCenteredText("Presented By:", 190.0f, 2.0f, col);
         }
@@ -481,7 +514,7 @@ void IntroScene_Render(float demoTime)
             float scale = 0.60f + 0.05f * sinf(t * 1.5f);
             float driftX = 6.0f * sinf(t * 0.45f);
             float driftY = 4.0f * sinf(t * 0.30f);
-            float angle = 0.10f * sinf(t * 0.80f);   // gentle wobble
+            float angle = 0.10f * sinf(t * 0.80f);
 
             float cosA = cosf(angle);
             float sinA = sinf(angle);
@@ -502,32 +535,20 @@ void IntroScene_Render(float demoTime)
             IntroVertex v[4];
             float rx, ry;
 
-            // TL
-            rx = x0 * cosA - y0 * sinA;
-            ry = x0 * sinA + y0 * cosA;
-            v[0].x = cx + rx; v[0].y = cy + ry;
-            v[0].z = 0.0f; v[0].rhw = 1.0f;
+            rx = x0 * cosA - y0 * sinA; ry = x0 * sinA + y0 * cosA;
+            v[0].x = cx + rx; v[0].y = cy + ry; v[0].z = 0.0f; v[0].rhw = 1.0f;
             v[0].color = colLogo; v[0].u = 0.0f; v[0].v = 0.0f;
 
-            // TR
-            rx = x1 * cosA - y1 * sinA;
-            ry = x1 * sinA + y1 * cosA;
-            v[1].x = cx + rx; v[1].y = cy + ry;
-            v[1].z = 0.0f; v[1].rhw = 1.0f;
+            rx = x1 * cosA - y1 * sinA; ry = x1 * sinA + y1 * cosA;
+            v[1].x = cx + rx; v[1].y = cy + ry; v[1].z = 0.0f; v[1].rhw = 1.0f;
             v[1].color = colLogo; v[1].u = 1.0f; v[1].v = 0.0f;
 
-            // BL
-            rx = x2 * cosA - y2 * sinA;
-            ry = x2 * sinA + y2 * cosA;
-            v[2].x = cx + rx; v[2].y = cy + ry;
-            v[2].z = 0.0f; v[2].rhw = 1.0f;
+            rx = x2 * cosA - y2 * sinA; ry = x2 * sinA + y2 * cosA;
+            v[2].x = cx + rx; v[2].y = cy + ry; v[2].z = 0.0f; v[2].rhw = 1.0f;
             v[2].color = colLogo; v[2].u = 0.0f; v[2].v = 1.0f;
 
-            // BR
-            rx = x3 * cosA - y3 * sinA;
-            ry = x3 * sinA + y3 * cosA;
-            v[3].x = cx + rx; v[3].y = cy + ry;
-            v[3].z = 0.0f; v[3].rhw = 1.0f;
+            rx = x3 * cosA - y3 * sinA; ry = x3 * sinA + y3 * cosA;
+            v[3].x = cx + rx; v[3].y = cy + ry; v[3].z = 0.0f; v[3].rhw = 1.0f;
             v[3].color = colLogo; v[3].u = 1.0f; v[3].v = 1.0f;
 
             g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
@@ -537,6 +558,10 @@ void IntroScene_Render(float demoTime)
             g_pDevice->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
             g_pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
             g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
+
+            // EXTRA SAFETY: normalize coord gen + transforms for stage0 during intro draws
+            g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+            g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
 
             g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
             g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
@@ -551,12 +576,7 @@ void IntroScene_Render(float demoTime)
             g_pDevice->SetTexture(0, s_logoTex);
             g_pDevice->SetVertexShader(INTRO_FVF);
 
-            g_pDevice->DrawPrimitiveUP(
-                D3DPT_TRIANGLESTRIP,
-                2,
-                v,
-                sizeof(IntroVertex)
-            );
+            g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(IntroVertex));
         }
         if (s_phaseFrame > (LOGO_IN + LOGO_HOLD + LOGO_OUT))
         {
@@ -597,15 +617,9 @@ void IntroScene_Render(float demoTime)
         fade = ComputeFadeAlphaInt(s_phaseFrame, SUPPORT_IN, SUPPORT_HOLD, SUPPORT_OUT);
         if (fade > 0)
         {
-            // Top text: larger and properly centered
             DWORD textCol = D3DCOLOR_ARGB(255, fade, fade, fade);
             DrawCenteredText("Proudly Supporting:", 60.0f, 2.0f, textCol);
 
-            // xbs.dds in dead-center, with a different style from tr.dds:
-            //  - No rotation
-            //  - Bigger breathing pulse
-            //  - Squash & stretch
-            //  - Circular drift
             if (s_xbsTex && s_xbsW > 0 && s_xbsH > 0)
             {
                 DWORD texCol = D3DCOLOR_ARGB(fade, 255, 255, 255);
@@ -622,7 +636,6 @@ void IntroScene_Render(float demoTime)
                 float w = s_xbsW * baseScale * squash;
                 float h = s_xbsH * baseScale * stretch;
 
-                // True center of screen, plus small orbit offset
                 float cx = SCREEN_W * 0.5f + orbitX;
                 float cy = SCREEN_H * 0.5f + orbitY + 90.0f;
 
@@ -632,18 +645,10 @@ void IntroScene_Render(float demoTime)
                 float bottom = cy + h * 0.5f;
 
                 IntroVertex v[4];
-
-                v[0].x = left;  v[0].y = top;    v[0].z = 0.0f; v[0].rhw = 1.0f;
-                v[0].color = texCol; v[0].u = 0.0f; v[0].v = 0.0f;
-
-                v[1].x = right; v[1].y = top;    v[1].z = 0.0f; v[1].rhw = 1.0f;
-                v[1].color = texCol; v[1].u = 1.0f; v[1].v = 0.0f;
-
-                v[2].x = left;  v[2].y = bottom; v[2].z = 0.0f; v[2].rhw = 1.0f;
-                v[2].color = texCol; v[2].u = 0.0f; v[2].v = 1.0f;
-
-                v[3].x = right; v[3].y = bottom; v[3].z = 0.0f; v[3].rhw = 1.0f;
-                v[3].color = texCol; v[3].u = 1.0f; v[3].v = 1.0f;
+                v[0] = { left,  top,    0.0f, 1.0f, texCol, 0.0f, 0.0f };
+                v[1] = { right, top,    0.0f, 1.0f, texCol, 1.0f, 0.0f };
+                v[2] = { left,  bottom, 0.0f, 1.0f, texCol, 0.0f, 1.0f };
+                v[3] = { right, bottom, 0.0f, 1.0f, texCol, 1.0f, 1.0f };
 
                 g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
                 g_pDevice->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
@@ -652,6 +657,9 @@ void IntroScene_Render(float demoTime)
                 g_pDevice->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
                 g_pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
                 g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
+
+                g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+                g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
 
                 g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
                 g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
@@ -665,20 +673,13 @@ void IntroScene_Render(float demoTime)
 
                 g_pDevice->SetTexture(0, s_xbsTex);
                 g_pDevice->SetVertexShader(INTRO_FVF);
-
-                g_pDevice->DrawPrimitiveUP(
-                    D3DPT_TRIANGLESTRIP,
-                    2,
-                    v,
-                    sizeof(IntroVertex)
-                );
+                g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(IntroVertex));
             }
         }
         if (s_phaseFrame > (SUPPORT_IN + SUPPORT_HOLD + SUPPORT_OUT))
         {
             s_phase = PHASE_DONE;
             s_phaseFrame = 0;
-            // Optionally: s_introActive = false; // hand off to next scene
         }
         break;
 
@@ -686,4 +687,7 @@ void IntroScene_Render(float demoTime)
     default:
         break;
     }
+
+    // BIG FIX: always normalize state after intro so later scenes don't inherit it
+    IntroScene_EndFrameStateCleanup();
 }

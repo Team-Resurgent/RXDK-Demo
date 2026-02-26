@@ -12,8 +12,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BallScene.cpp" />
+    <ClCompile Include="ChromeScene.cpp" />
     <ClCompile Include="CityScene.cpp" />
     <ClCompile Include="Credits.cpp" />
+    <ClCompile Include="CubeEnvScene.cpp" />
     <ClCompile Include="CubeScene.cpp" />
     <ClCompile Include="DripScene.cpp" />
     <ClCompile Include="font.cpp" />
@@ -24,6 +26,7 @@
     <ClCompile Include="MazeScene.cpp" />
     <ClCompile Include="music.cpp" />
     <ClCompile Include="PlasmaScene.cpp" />
+    <ClCompile Include="PostFXScene.cpp" />
     <ClCompile Include="RingScene.cpp" />
     <ClCompile Include="UVRDXKScene.cpp" />
     <ClCompile Include="XScene.cpp" />
@@ -33,8 +36,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BallScene.h" />
+    <ClInclude Include="ChromeScene.h" />
     <ClInclude Include="CityScene.h" />
     <ClInclude Include="Credits.h" />
+    <ClInclude Include="CubeEnvScene.h" />
     <ClInclude Include="CubeScene.h" />
     <ClInclude Include="DripScene.h" />
     <ClInclude Include="font.h" />
@@ -44,6 +49,7 @@
     <ClInclude Include="MazeScene.h" />
     <ClInclude Include="music.h" />
     <ClInclude Include="PlasmaScene.h" />
+    <ClInclude Include="PostFXScene.h" />
     <ClInclude Include="RingScene.h" />
     <ClInclude Include="UVRXDKScene.h" />
     <ClInclude Include="XScene.h" />
@@ -51,6 +57,15 @@
   <ItemGroup>
     <Image Include="Media\galaxy\cloud_256.dds" />
     <Image Include="Media\metal.dds" />
+    <Image Include="Media\tex\chrome.dds" />
+    <Image Include="Media\tex\chrome_bmp.dds" />
+    <Image Include="Media\tex\chrome_diff.dds" />
+    <Image Include="Media\tex\cube_face0.dds" />
+    <Image Include="Media\tex\cube_face1.dds" />
+    <Image Include="Media\tex\cube_face2.dds" />
+    <Image Include="Media\tex\cube_face3.dds" />
+    <Image Include="Media\tex\cube_face4.dds" />
+    <Image Include="Media\tex\cube_face5.dds" />
     <Image Include="Media\tr.dds" />
     <Image Include="Media\xbs.dds" />
   </ItemGroup>
