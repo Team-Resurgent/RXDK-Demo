@@ -48,7 +48,7 @@
     <ClCompile Include="GalaxyScene.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="UVRDXKScene.cpp">
+    <ClCompile Include="VURDXKScene.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="XScene.cpp">
@@ -81,6 +81,9 @@
     <ClCompile Include="PostFXScene.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="menu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Text Include="Media\Copy Assets Here.txt">
@@ -109,7 +112,7 @@
     <ClInclude Include="GalaxyScene.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="UVRXDKScene.h">
+    <ClInclude Include="VURXDKScene.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="XScene.h">
@@ -140,6 +143,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="PostFXScene.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="menu.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

@@ -26,4 +26,4 @@ bool Music_IsPlaying();
 // out[0]=low, out[1]=mid, out[2]=high, out[3]=overall
 // Safe: no float->int casts, computed from streamed PCM.
 // -----------------------------------------------------------------------------
-void Music_GetUVLevels(int out4[4]);
+void Music_GetVULevels(int out4[4]);

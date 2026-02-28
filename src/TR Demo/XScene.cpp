@@ -801,10 +801,10 @@ static void RenderInteriorFX(const D3DXMATRIX& world, DWORD tMs)
 {
     g_pDevice->SetTransform(D3DTS_WORLD, &world);
 
-    int uv[4] = { 0,0,0,0 };
-    Music_GetUVLevels(uv);
+    int vu[4] = { 0,0,0,0 };
+    Music_GetVULevels(vu);
 
-    float music = 1.0f + (float)uv[0] * 0.0040f;
+    float music = 1.0f + (float)vu[0] * 0.0040f;
 
     int base = (int)((tMs / 6) & 1023);
 

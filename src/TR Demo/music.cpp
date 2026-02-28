@@ -39,7 +39,7 @@ static DWORD s_writeCursor = 0;
 static const DWORD STREAM_BUF_BYTES = (2 * 1024 * 1024);   // 2MB
 static const DWORD STREAM_CHUNK_BYTES = (32 * 1024);          // 32KB per fill
 static const DWORD TARGET_AHEAD_BYTES = (1 * 1024 * 1024);    // 1MB target ahead
-static const int   UV_STRIDE = 16;
+static const int   VU_STRIDE = 16;
 
 // -----------------------------------------------------------------------------
 // Volume ramp
@@ -61,13 +61,13 @@ static void VolumeRamp_Update()
 }
 
 // -----------------------------------------------------------------------------
-// UV meter — strided to reduce per-frame cost
+// VU meter — strided to reduce per-frame cost
 // -----------------------------------------------------------------------------
-static volatile LONG s_uvPacked = 0;
+static volatile LONG s_vuPacked = 0;
 static int s_avgFast = 0;
 static int s_avgSlow = 0;
 
-static void UV_Analyze(const void* data, DWORD bytes)
+static void VU_Analyze(const void* data, DWORD bytes)
 {
     if (!data || bytes < 2) return;
     const short* s = (const short*)data;
@@ -75,8 +75,8 @@ static void UV_Analyze(const void* data, DWORD bytes)
     DWORD count = 0;
     int   sum = 0;
 
-    // Step by UV_STRIDE samples — 16x fewer iterations than before
-    for (DWORD i = 0; i < total; i += UV_STRIDE)
+    // Step by VU_STRIDE samples — 16x fewer iterations than before
+    for (DWORD i = 0; i < total; i += VU_STRIDE)
     {
         int v = (int)s[i];
         sum += (v < 0) ? -v : v;
@@ -89,7 +89,7 @@ static void UV_Analyze(const void* data, DWORD bytes)
 
     int a = s_avgFast >> 5; if (a > 255) a = 255;
     int b = s_avgSlow >> 5; if (b > 255) b = 255;
-    s_uvPacked = (LONG)((a) | (b << 8) | (a << 16) | (b << 24));
+    s_vuPacked = (LONG)((a) | (b << 8) | (a << 16) | (b << 24));
 }
 
 // -----------------------------------------------------------------------------
@@ -192,8 +192,8 @@ static void FillBuffer(DWORD bytes)
     DWORD b1 = 0, b2 = 0;
     if (FAILED(s_buf->Lock(s_writeCursor, bytes, &p1, &b1, &p2, &b2, 0))) return;
 
-    if (p1 && b1) { ReadAudioLoop((BYTE*)p1, b1); UV_Analyze(p1, b1); }
-    if (p2 && b2) { ReadAudioLoop((BYTE*)p2, b2); UV_Analyze(p2, b2); }
+    if (p1 && b1) { ReadAudioLoop((BYTE*)p1, b1); VU_Analyze(p1, b1); }
+    if (p2 && b2) { ReadAudioLoop((BYTE*)p2, b2); VU_Analyze(p2, b2); }
 
     s_buf->Unlock(p1, b1, p2, b2);
     s_writeCursor = (s_writeCursor + bytes) % s_bufBytes;
@@ -250,7 +250,7 @@ bool Music_Init(const char* path)
 
     s_dataPos = s_writeCursor = 0;
     s_avgFast = s_avgSlow = 0;
-    s_uvPacked = 0;
+    s_vuPacked = 0;
     s_ready = true;
 
     s_buf->Stop();
@@ -274,7 +274,7 @@ void Music_Shutdown()
     s_dataOffset = s_dataSize = s_dataPos = 0;
     s_bufBytes = s_writeCursor = 0;
     s_avgFast = s_avgSlow = 0;
-    s_uvPacked = 0;
+    s_vuPacked = 0;
     s_targetVol = s_curVol = DSBVOLUME_MAX;
     s_rampLeft = 0;
 }
@@ -345,10 +345,10 @@ void Music_Update()
 bool Music_IsReady() { return s_ready; }
 bool Music_IsPlaying() { return s_playing; }
 
-void Music_GetUVLevels(int out4[4])
+void Music_GetVULevels(int out4[4])
 {
     if (!out4) return;
-    LONG p = s_uvPacked;
+    LONG p = s_vuPacked;
     out4[0] = (p >> 0) & 255;
     out4[1] = (p >> 8) & 255;
     out4[2] = (p >> 16) & 255;

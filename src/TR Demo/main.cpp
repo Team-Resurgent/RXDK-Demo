@@ -4,6 +4,7 @@
 //   A     = skip to next scene (fade out/in)
 //   B     = exit to dashboard (best effort)
 //   START = toggle music play/pause
+//   BACK  = open/close overlay menu
 
 #include <xtl.h>
 #include <math.h>
@@ -11,6 +12,7 @@
 
 #include "input.h"
 #include "music.h"
+#include "Menu.h"
 
 #include "IntroScene.h"
 #include "PlasmaScene.h"
@@ -175,6 +177,19 @@ static void ShutdownD3D()
 static DemoSceneId NextScene(DemoSceneId id)
 {
     int n = (int)id + 1;
+    int tries = 0;
+
+    while (tries < (int)SCENE_COUNT)
+    {
+        if (n >= (int)SCENE_COUNT) n = 0;
+        if (Menu_IsSceneEnabled(n))
+            return (DemoSceneId)n;
+        n++;
+        tries++;
+    }
+
+    // All disabled (shouldn't happen; menu prevents it) — advance normally
+    n = (int)id + 1;
     if (n >= (int)SCENE_COUNT) n = 0;
     return (DemoSceneId)n;
 }
@@ -183,21 +198,21 @@ static void InitScene(DemoSceneId id)
 {
     switch (id)
     {
-    case SCENE_INTRO:   IntroScene_Init();   break;
-    case SCENE_PLASMA:  PlasmaScene_Init();  break;
-    case SCENE_BALL:    BallScene_Init();    break;
-    case SCENE_CHROME:  ChromeScene_Init();  break;
-    case SCENE_RING:    RingScene_Init();    break;
-    case SCENE_GALAXY:  GalaxyScene_Init();  break;
-    case SCENE_UVRXDK:  UVRXDKScene_Init();  break;
-    case SCENE_X:       XScene_Init();       break;
-    case SCENE_CUBE:    CubeScene_Init();    break;
-    case SCENE_CUBE_ENV: CubeEnvScene_Init(); break;
-    case SCENE_DRIP:    DripScene_Init();    break;
-    case SCENE_MAZE:    MazeScene_Init();    break;
-    case SCENE_POSTFX:  PostFXScene_Init();  break;
-    case SCENE_CREDITS: Credits_Init();      break;
-    case SCENE_CITY:    CityScene_Init();    break;
+    case SCENE_INTRO:    IntroScene_Init();    break;
+    case SCENE_PLASMA:   PlasmaScene_Init();   break;
+    case SCENE_BALL:     BallScene_Init();     break;
+    case SCENE_CHROME:   ChromeScene_Init();   break;
+    case SCENE_RING:     RingScene_Init();     break;
+    case SCENE_GALAXY:   GalaxyScene_Init();   break;
+    case SCENE_UVRXDK:   UVRXDKScene_Init();   break;
+    case SCENE_X:        XScene_Init();        break;
+    case SCENE_CUBE:     CubeScene_Init();     break;
+    case SCENE_CUBE_ENV: CubeEnvScene_Init();  break;
+    case SCENE_DRIP:     DripScene_Init();     break;
+    case SCENE_MAZE:     MazeScene_Init();     break;
+    case SCENE_POSTFX:   PostFXScene_Init();   break;
+    case SCENE_CREDITS:  Credits_Init();       break;
+    case SCENE_CITY:     CityScene_Init();     break;
     default: break;
     }
 }
@@ -206,21 +221,21 @@ static void ShutdownScene(DemoSceneId id)
 {
     switch (id)
     {
-    case SCENE_INTRO:   IntroScene_Shutdown();   break;
-    case SCENE_PLASMA:  PlasmaScene_Shutdown();  break;
-    case SCENE_BALL:    BallScene_Shutdown();    break;
-    case SCENE_CHROME:  ChromeScene_Shutdown();  break;
-    case SCENE_RING:    RingScene_Shutdown();    break;
-    case SCENE_GALAXY:  GalaxyScene_Shutdown();  break;
-    case SCENE_UVRXDK:  UVRXDKScene_Shutdown();  break;
-    case SCENE_X:       XScene_Shutdown();       break;
-    case SCENE_CUBE:    CubeScene_Shutdown();    break;
-    case SCENE_CUBE_ENV: CubeEnvScene_Shutdown(); break;
-    case SCENE_DRIP:    DripScene_Shutdown();    break;
-    case SCENE_MAZE:    MazeScene_Shutdown();    break;
-    case SCENE_POSTFX:  PostFXScene_Shutdown();  break;
-    case SCENE_CREDITS: Credits_Shutdown();      break;
-    case SCENE_CITY:    CityScene_Shutdown();    break;
+    case SCENE_INTRO:    IntroScene_Shutdown();    break;
+    case SCENE_PLASMA:   PlasmaScene_Shutdown();   break;
+    case SCENE_BALL:     BallScene_Shutdown();     break;
+    case SCENE_CHROME:   ChromeScene_Shutdown();   break;
+    case SCENE_RING:     RingScene_Shutdown();     break;
+    case SCENE_GALAXY:   GalaxyScene_Shutdown();   break;
+    case SCENE_UVRXDK:   UVRXDKScene_Shutdown();   break;
+    case SCENE_X:        XScene_Shutdown();        break;
+    case SCENE_CUBE:     CubeScene_Shutdown();     break;
+    case SCENE_CUBE_ENV: CubeEnvScene_Shutdown();  break;
+    case SCENE_DRIP:     DripScene_Shutdown();     break;
+    case SCENE_MAZE:     MazeScene_Shutdown();     break;
+    case SCENE_POSTFX:   PostFXScene_Shutdown();   break;
+    case SCENE_CREDITS:  Credits_Shutdown();       break;
+    case SCENE_CITY:     CityScene_Shutdown();     break;
     default: break;
     }
 }
@@ -229,21 +244,21 @@ static void RenderScene(DemoSceneId id, float demoTime)
 {
     switch (id)
     {
-    case SCENE_INTRO:   IntroScene_Render(demoTime);   break;
-    case SCENE_PLASMA:  PlasmaScene_Render(demoTime);  break;
-    case SCENE_BALL:    BallScene_Render();            break;
-    case SCENE_CHROME:  ChromeScene_Render(demoTime);  break;
-    case SCENE_RING:    RingScene_Render(demoTime);    break;
-    case SCENE_GALAXY:  GalaxyScene_Render(demoTime);  break;
-    case SCENE_UVRXDK:  UVRXDKScene_Render(demoTime);  break;
-    case SCENE_X:       XScene_Render(demoTime);       break;
-    case SCENE_CUBE:    CubeScene_Render(demoTime);    break;
-    case SCENE_CUBE_ENV: CubeEnvScene_Render(demoTime); break;
-    case SCENE_DRIP:    DripScene_Render();            break;
-    case SCENE_MAZE:    MazeScene_Render();            break;
-    case SCENE_POSTFX:  PostFXScene_Render(demoTime);  break;
-    case SCENE_CREDITS: Credits_Render(demoTime);      break;
-    case SCENE_CITY:    CityScene_Render(demoTime);    break;
+    case SCENE_INTRO:    IntroScene_Render(demoTime);    break;
+    case SCENE_PLASMA:   PlasmaScene_Render(demoTime);   break;
+    case SCENE_BALL:     BallScene_Render();             break;
+    case SCENE_CHROME:   ChromeScene_Render(demoTime);   break;
+    case SCENE_RING:     RingScene_Render(demoTime);     break;
+    case SCENE_GALAXY:   GalaxyScene_Render(demoTime);   break;
+    case SCENE_UVRXDK:   UVRXDKScene_Render(demoTime);   break;
+    case SCENE_X:        XScene_Render(demoTime);        break;
+    case SCENE_CUBE:     CubeScene_Render(demoTime);     break;
+    case SCENE_CUBE_ENV: CubeEnvScene_Render(demoTime);  break;
+    case SCENE_DRIP:     DripScene_Render();             break;
+    case SCENE_MAZE:     MazeScene_Render();             break;
+    case SCENE_POSTFX:   PostFXScene_Render(demoTime);   break;
+    case SCENE_CREDITS:  Credits_Render(demoTime);       break;
+    case SCENE_CITY:     CityScene_Render(demoTime);     break;
     default: break;
     }
 }
@@ -332,21 +347,21 @@ static DWORD SceneDurationMs(DemoSceneId id)
 {
     switch (id)
     {
-    case SCENE_INTRO:   return INTRO_SCENE_MS;
-    case SCENE_PLASMA:  return PLASMA_SCENE_MS;
-    case SCENE_RING:    return RING_SCENE_MS;
-    case SCENE_CHROME:  return CHROME_SCENE_MS;
-    case SCENE_GALAXY:  return GALAXY_SCENE_MS;
-    case SCENE_UVRXDK:  return UVRXDK_SCENE_MS;
-    case SCENE_X:       return X_SCENE_MS;
-    case SCENE_CUBE:    return CUBE_SCENE_MS;
+    case SCENE_INTRO:    return INTRO_SCENE_MS;
+    case SCENE_PLASMA:   return PLASMA_SCENE_MS;
+    case SCENE_RING:     return RING_SCENE_MS;
+    case SCENE_CHROME:   return CHROME_SCENE_MS;
+    case SCENE_GALAXY:   return GALAXY_SCENE_MS;
+    case SCENE_UVRXDK:   return UVRXDK_SCENE_MS;
+    case SCENE_X:        return X_SCENE_MS;
+    case SCENE_CUBE:     return CUBE_SCENE_MS;
     case SCENE_CUBE_ENV: return CUBE_ENV_SCENE_MS;
-    case SCENE_DRIP:    return DRIP_SCENE_MS;
-    case SCENE_MAZE:    return MAZE_SCENE_MS;
-    case SCENE_POSTFX: return POSTFX_SCENE_MS;
-    case SCENE_CREDITS: return CREDITS_SCENE_MS;
-    case SCENE_CITY:    return CITY_SCENE_MS;
-    default:            return 20000;
+    case SCENE_DRIP:     return DRIP_SCENE_MS;
+    case SCENE_MAZE:     return MAZE_SCENE_MS;
+    case SCENE_POSTFX:   return POSTFX_SCENE_MS;
+    case SCENE_CREDITS:  return CREDITS_SCENE_MS;
+    case SCENE_CITY:     return CITY_SCENE_MS;
+    default:             return 20000;
     }
 }
 
@@ -387,7 +402,6 @@ static void UpdateDemoState(DWORD nowTicks, bool requestSkip)
 
             g_demo.current = g_demo.next;
             g_demo.sceneStartTicks = nowTicks;
-
             g_demo.transitionPhase = 1;
             g_demo.transitionStartTicks = nowTicks;
         }
@@ -434,6 +448,10 @@ static void RenderFrame(float demoTime)
     RenderScene(g_demo.current, demoTime);
     DrawFadeOverlay(g_demo.overlayAlpha);
 
+    // Menu overlay — drawn after scene fade so it is always fully visible
+    if (Menu_IsOpen())
+        Menu_Render();
+
     g_pDevice->EndScene();
     g_pDevice->Present(NULL, NULL, NULL, NULL);
 }
@@ -450,9 +468,9 @@ void __cdecl main()
         while (1) Sleep(1000);
     }
 
-    // ---------------------------------------------------------------------
+    // -------------------------------------------------------------------------
     // Display settle: wait for TV to lock after mode switch
-    // ---------------------------------------------------------------------
+    // -------------------------------------------------------------------------
     const int SETTLE_FRAMES = 90; // ~1.5s at 60Hz
 
     for (int i = 0; i < SETTLE_FRAMES; ++i)
@@ -468,10 +486,10 @@ void __cdecl main()
         g_pDevice->Present(NULL, NULL, NULL, NULL);
     }
 
-
     Sleep(1750);
 
     InitInput();
+    Menu_Init((int)SCENE_COUNT);
 
     Music_Init("D:\\snd\\idk.trm");
     Music_Play();
@@ -498,37 +516,56 @@ void __cdecl main()
 
         PumpInput();
         WORD buttons = GetButtons();
-
         WORD pressed = (WORD)(buttons & (WORD)~lastButtons);
         lastButtons = buttons;
 
-        if (pressed & BTN_B)
-            ExitToDashboard();
+        // BACK toggles the overlay menu
+        if (pressed & BTN_BACK)
+            Menu_Toggle();
 
-        if (pressed & BTN_START)
+        // Drive menu state machine — returns true when menu is consuming input
+        bool menuActive = Menu_Update(now, pressed);
+
+        if (!menuActive)
         {
-            if (musicPaused) { Music_Play();  musicPaused = false; }
-            else { Music_Pause(); musicPaused = true; }
+            // Normal demo controls (only when menu is closed)
+            if (pressed & BTN_B)
+                ExitToDashboard();
+
+            if (pressed & BTN_START)
+            {
+                if (musicPaused) { Music_Play();  musicPaused = false; }
+                else { Music_Pause(); musicPaused = true; }
+            }
         }
 
-        bool requestSkip = (pressed & BTN_A) != 0;
+        // Sync music mute state in case menu toggled it
+        musicPaused = Menu_IsMusicMuted();
+
+        // A to skip scene — only when menu is closed and not mid-transition
+        bool requestSkip = (!menuActive) && ((pressed & BTN_A) != 0);
+
+        // Handle scene jump or dashboard exit requested from the menu
+        int jumpTo = Menu_GetRequestedScene();
+        if (jumpTo == -2)
+        {
+            ExitToDashboard();
+        }
+        else if (jumpTo >= 0 && !g_demo.inTransition)
+        {
+            BeginTransitionTo((DemoSceneId)jumpTo, now);
+        }
 
         Music_Update();
 
         if (g_demo.current == SCENE_BALL && !g_demo.inTransition)
-        {
             BallScene_Update();
-        }
 
         if (g_demo.current == SCENE_DRIP && !g_demo.inTransition)
-        {
             DripScene_Update();
-        }
 
         if (g_demo.current == SCENE_MAZE && !g_demo.inTransition)
-        {
             MazeScene_Update();
-        }
 
         UpdateDemoState(now, requestSkip);
         RenderFrame(demoTime);

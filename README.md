@@ -15,7 +15,7 @@ the RXDK environment.
 - Button-mapped actions (no mouse / no virtual cursors)
 - Designed for deterministic rendering (no dynamic allocations per frame)
 
- ## RDXK Demos
+ ## RXDK Demos
 
 - IntroScene - Opening title/logo sequence
 - ChromeScene - A DXT1/DXT5 bump mapping sample with diffuse lighting and UV ripple
@@ -23,13 +23,13 @@ the RXDK environment.
 - BallScene - Physics demo with bouncing balls featuring squash/stretch deformation and multiple materials (rubber, chrome, glass, plasma)
 - RingScene - Animated ring/torus geometry effects
 - GalaxyScene - Procedural space scene with stars, nebulae, and dust particles with stats overlay
-- UVRXDKScene - Large wireframe "RXDK" letters with music-reactive VU meter fills
+- VURXDKScene - Large wireframe "RXDK" letters with music-reactive VU meter fills
 - XScene - Xbox logo visualization
 - CubeScene - Spinning cube with Matrix-style "RXDK" text rain on all 6 faces
-- CuveEnvScene - A spinning cube with enviroment mapping and  with a XBOX themed space background
+- CuveEnvScene - A spinning cube with environment  mapping and  with an XBOX themed space background
 - CityScene - Animated cityscape/skyline scene
 - DripScene - Interactive water ripple simulation with multi-layer shading, rain mode, and realistic physics
-- MazeScene - A cel shaded Windows 95 like maze
+- MazeScene - A cel-shaded Windows 95-like maze
 - PostFXScene - Various PostFX samples such as lenswarping, vignette, heat warping, and a few other techniques to appear as a black hole 
 - Credits - Star Wars-style scrolling credits with perspective and color-coded shoutouts
 
@@ -58,6 +58,12 @@ the RXDK environment.
 - A: Skip Scene
 - B: Exit to Dashboard
 - Start: Play / Pause Music
+
+### Menu
+- Back: Enters / Exits menu
+- D-Pad: navigation
+- A: Selects item
+- B: Back
 
 ### Per Scene:
 #### BallScene

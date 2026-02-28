@@ -24,11 +24,12 @@
     <ClCompile Include="IntroScene.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="MazeScene.cpp" />
+    <ClCompile Include="menu.cpp" />
     <ClCompile Include="music.cpp" />
     <ClCompile Include="PlasmaScene.cpp" />
     <ClCompile Include="PostFXScene.cpp" />
     <ClCompile Include="RingScene.cpp" />
-    <ClCompile Include="UVRDXKScene.cpp" />
+    <ClCompile Include="VURDXKScene.cpp" />
     <ClCompile Include="XScene.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -47,11 +48,12 @@
     <ClInclude Include="input.h" />
     <ClInclude Include="IntroScene.h" />
     <ClInclude Include="MazeScene.h" />
+    <ClInclude Include="menu.h" />
     <ClInclude Include="music.h" />
     <ClInclude Include="PlasmaScene.h" />
     <ClInclude Include="PostFXScene.h" />
     <ClInclude Include="RingScene.h" />
-    <ClInclude Include="UVRXDKScene.h" />
+    <ClInclude Include="VURXDKScene.h" />
     <ClInclude Include="XScene.h" />
   </ItemGroup>
   <ItemGroup>
