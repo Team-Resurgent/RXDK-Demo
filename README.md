@@ -22,16 +22,17 @@ the RXDK environment.
 - PlasmaScene - Fullscreen animated plasma effect with swirling color patterns and camera drift
 - BallScene - Physics demo with bouncing balls featuring squash/stretch deformation and multiple materials (rubber, chrome, glass, plasma)
 - RingScene - Animated ring/torus geometry effects
+- GlassScene - Staind glass inspired scene showing off CPU based vertex shading a DOT3 PS shading.
 - GalaxyScene - Procedural space scene with stars, nebulae, and dust particles with stats overlay
 - VURXDKScene - Large wireframe "RXDK" letters with music-reactive VU meter fills
 - XScene - Xbox logo visualization
 - CubeScene - Spinning cube with Matrix-style "RXDK" text rain on all 6 faces
 - CuveEnvScene - A spinning cube with environment  mapping and  with an XBOX themed space background
-- CityScene - Animated cityscape/skyline scene
 - DripScene - Interactive water ripple simulation with multi-layer shading, rain mode, and realistic physics
 - MazeScene - A cel-shaded Windows 95-like maze
 - PostFXScene - Various PostFX samples such as lenswarping, vignette, heat warping, and a few other techniques to appear as a black hole 
 - Credits - Star Wars-style scrolling credits with perspective and color-coded shoutouts
+- CityScene - Animated cityscape/skyline scene
 
 ## Constraints / Design Notes
 

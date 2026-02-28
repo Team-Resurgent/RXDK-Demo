@@ -84,6 +84,9 @@
     <ClCompile Include="menu.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="GlassScene.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Text Include="Media\Copy Assets Here.txt">
@@ -148,6 +151,9 @@
     <ClInclude Include="menu.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="GlassScene.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Image Include="Media\galaxy\cloud_256.dds">
@@ -187,6 +193,9 @@
       <Filter>Media\tex</Filter>
     </Image>
     <Image Include="Media\tex\cube_face5.dds">
+      <Filter>Media\tex</Filter>
+    </Image>
+    <Image Include="Media\tex\glass_n.dds">
       <Filter>Media\tex</Filter>
     </Image>
   </ItemGroup>

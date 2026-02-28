@@ -19,8 +19,9 @@
 #include "BallScene.h"
 #include "ChromeScene.h"
 #include "RingScene.h"
+#include "GlassScene.h"
 #include "GalaxyScene.h"
-#include "UVRXDKScene.h"
+#include "VURXDKScene.h"
 #include "XScene.h"
 
 #include "CubeScene.h"
@@ -53,8 +54,9 @@ enum DemoSceneId
     SCENE_PLASMA,
     SCENE_BALL,
     SCENE_RING,
+    SCENE_GLASS,
     SCENE_GALAXY,
-    SCENE_UVRXDK,
+    SCENE_VURXDK,
     SCENE_X,
     SCENE_CUBE,
     SCENE_CUBE_ENV,
@@ -87,15 +89,16 @@ static const DWORD PLASMA_SCENE_MS = 10000;
 static const DWORD BALL_SCENE_MS = 10000;
 static const DWORD CHROME_SCENE_MS = 12000;
 static const DWORD RING_SCENE_MS = 15000;
+static const DWORD GLASS_SCENE_MS = 18000;
 static const DWORD GALAXY_SCENE_MS = 25000;
-static const DWORD UVRXDK_SCENE_MS = 20000;
+static const DWORD VURXDK_SCENE_MS = 15000;
 static const DWORD X_SCENE_MS = 25000;
-static const DWORD CUBE_SCENE_MS = 20000;
+static const DWORD CUBE_SCENE_MS = 18000;
 static const DWORD CUBE_ENV_SCENE_MS = 24000;
-static const DWORD DRIP_SCENE_MS = 26000;
-static const DWORD MAZE_SCENE_MS = 20000;
+static const DWORD DRIP_SCENE_MS = 20000;
+static const DWORD MAZE_SCENE_MS = 25000;
 static const DWORD POSTFX_SCENE_MS = 18000;
-static const DWORD CITY_SCENE_MS = 20000;
+static const DWORD CITY_SCENE_MS = 15000;
 static const DWORD CREDITS_SCENE_MS = 25000;
 
 static const DWORD FADE_DURATION_MS = 1000;
@@ -203,8 +206,9 @@ static void InitScene(DemoSceneId id)
     case SCENE_BALL:     BallScene_Init();     break;
     case SCENE_CHROME:   ChromeScene_Init();   break;
     case SCENE_RING:     RingScene_Init();     break;
+    case SCENE_GLASS:    GlassScene_Init();    break;
     case SCENE_GALAXY:   GalaxyScene_Init();   break;
-    case SCENE_UVRXDK:   UVRXDKScene_Init();   break;
+    case SCENE_VURXDK:   VURXDKScene_Init();   break;
     case SCENE_X:        XScene_Init();        break;
     case SCENE_CUBE:     CubeScene_Init();     break;
     case SCENE_CUBE_ENV: CubeEnvScene_Init();  break;
@@ -226,8 +230,9 @@ static void ShutdownScene(DemoSceneId id)
     case SCENE_BALL:     BallScene_Shutdown();     break;
     case SCENE_CHROME:   ChromeScene_Shutdown();   break;
     case SCENE_RING:     RingScene_Shutdown();     break;
+    case SCENE_GLASS:    GlassScene_Shutdown();    break;
     case SCENE_GALAXY:   GalaxyScene_Shutdown();   break;
-    case SCENE_UVRXDK:   UVRXDKScene_Shutdown();   break;
+    case SCENE_VURXDK:   VURXDKScene_Shutdown();   break;
     case SCENE_X:        XScene_Shutdown();        break;
     case SCENE_CUBE:     CubeScene_Shutdown();     break;
     case SCENE_CUBE_ENV: CubeEnvScene_Shutdown();  break;
@@ -249,8 +254,9 @@ static void RenderScene(DemoSceneId id, float demoTime)
     case SCENE_BALL:     BallScene_Render();             break;
     case SCENE_CHROME:   ChromeScene_Render(demoTime);   break;
     case SCENE_RING:     RingScene_Render(demoTime);     break;
+    case SCENE_GLASS:    GlassScene_Render(demoTime);    break;
     case SCENE_GALAXY:   GalaxyScene_Render(demoTime);   break;
-    case SCENE_UVRXDK:   UVRXDKScene_Render(demoTime);   break;
+    case SCENE_VURXDK:   VURXDKScene_Render(demoTime);   break;
     case SCENE_X:        XScene_Render(demoTime);        break;
     case SCENE_CUBE:     CubeScene_Render(demoTime);     break;
     case SCENE_CUBE_ENV: CubeEnvScene_Render(demoTime);  break;
@@ -350,9 +356,10 @@ static DWORD SceneDurationMs(DemoSceneId id)
     case SCENE_INTRO:    return INTRO_SCENE_MS;
     case SCENE_PLASMA:   return PLASMA_SCENE_MS;
     case SCENE_RING:     return RING_SCENE_MS;
+    case SCENE_GLASS:    return GLASS_SCENE_MS;
     case SCENE_CHROME:   return CHROME_SCENE_MS;
     case SCENE_GALAXY:   return GALAXY_SCENE_MS;
-    case SCENE_UVRXDK:   return UVRXDK_SCENE_MS;
+    case SCENE_VURXDK:   return VURXDK_SCENE_MS;
     case SCENE_X:        return X_SCENE_MS;
     case SCENE_CUBE:     return CUBE_SCENE_MS;
     case SCENE_CUBE_ENV: return CUBE_ENV_SCENE_MS;
@@ -494,6 +501,7 @@ void __cdecl main()
     Music_Init("D:\\snd\\idk.trm");
     Music_Play();
     bool musicPaused = false;
+    bool prevMenuActive = false;
 
     DWORD startTicks = GetTickCount();
 
@@ -539,8 +547,10 @@ void __cdecl main()
             }
         }
 
-        // Sync music mute state in case menu toggled it
-        musicPaused = Menu_IsMusicMuted();
+        // Sync music mute state only on the frame the menu closes
+        if (prevMenuActive && !menuActive)
+            musicPaused = Menu_IsMusicMuted();
+        prevMenuActive = menuActive;
 
         // A to skip scene — only when menu is closed and not mid-transition
         bool requestSkip = (!menuActive) && ((pressed & BTN_A) != 0);

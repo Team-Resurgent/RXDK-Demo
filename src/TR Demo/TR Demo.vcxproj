@@ -20,6 +20,7 @@
     <ClCompile Include="DripScene.cpp" />
     <ClCompile Include="font.cpp" />
     <ClCompile Include="GalaxyScene.cpp" />
+    <ClCompile Include="GlassScene.cpp" />
     <ClCompile Include="input.cpp" />
     <ClCompile Include="IntroScene.cpp" />
     <ClCompile Include="main.cpp" />
@@ -45,6 +46,7 @@
     <ClInclude Include="DripScene.h" />
     <ClInclude Include="font.h" />
     <ClInclude Include="GalaxyScene.h" />
+    <ClInclude Include="GlassScene.h" />
     <ClInclude Include="input.h" />
     <ClInclude Include="IntroScene.h" />
     <ClInclude Include="MazeScene.h" />
@@ -68,6 +70,7 @@
     <Image Include="Media\tex\cube_face3.dds" />
     <Image Include="Media\tex\cube_face4.dds" />
     <Image Include="Media\tex\cube_face5.dds" />
+    <Image Include="Media\tex\glass_n.dds" />
     <Image Include="Media\tr.dds" />
     <Image Include="Media\xbs.dds" />
   </ItemGroup>
