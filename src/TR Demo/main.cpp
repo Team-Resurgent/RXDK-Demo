@@ -21,6 +21,7 @@
 #include "RingScene.h"
 #include "GlassScene.h"
 #include "GalaxyScene.h"
+#include "CrystalScene.h"
 #include "VURXDKScene.h"
 #include "XScene.h"
 
@@ -56,6 +57,7 @@ enum DemoSceneId
     SCENE_RING,
     SCENE_GLASS,
     SCENE_GALAXY,
+	SCENE_CRYSTAL,
     SCENE_VURXDK,
     SCENE_X,
     SCENE_CUBE,
@@ -91,6 +93,7 @@ static const DWORD CHROME_SCENE_MS = 12000;
 static const DWORD RING_SCENE_MS = 15000;
 static const DWORD GLASS_SCENE_MS = 18000;
 static const DWORD GALAXY_SCENE_MS = 25000;
+static const DWORD CRYSTAL_SCENE_MS = 20000;
 static const DWORD VURXDK_SCENE_MS = 15000;
 static const DWORD X_SCENE_MS = 25000;
 static const DWORD CUBE_SCENE_MS = 18000;
@@ -208,6 +211,7 @@ static void InitScene(DemoSceneId id)
     case SCENE_RING:     RingScene_Init();     break;
     case SCENE_GLASS:    GlassScene_Init();    break;
     case SCENE_GALAXY:   GalaxyScene_Init();   break;
+	case SCENE_CRYSTAL:  CrystalScene_Init();  break;
     case SCENE_VURXDK:   VURXDKScene_Init();   break;
     case SCENE_X:        XScene_Init();        break;
     case SCENE_CUBE:     CubeScene_Init();     break;
@@ -232,6 +236,7 @@ static void ShutdownScene(DemoSceneId id)
     case SCENE_RING:     RingScene_Shutdown();     break;
     case SCENE_GLASS:    GlassScene_Shutdown();    break;
     case SCENE_GALAXY:   GalaxyScene_Shutdown();   break;
+	case SCENE_CRYSTAL:  CrystalScene_Shutdown();  break;
     case SCENE_VURXDK:   VURXDKScene_Shutdown();   break;
     case SCENE_X:        XScene_Shutdown();        break;
     case SCENE_CUBE:     CubeScene_Shutdown();     break;
@@ -256,6 +261,7 @@ static void RenderScene(DemoSceneId id, float demoTime)
     case SCENE_RING:     RingScene_Render(demoTime);     break;
     case SCENE_GLASS:    GlassScene_Render(demoTime);    break;
     case SCENE_GALAXY:   GalaxyScene_Render(demoTime);   break;
+	case SCENE_CRYSTAL:  CrystalScene_Render(demoTime);  break;
     case SCENE_VURXDK:   VURXDKScene_Render(demoTime);   break;
     case SCENE_X:        XScene_Render(demoTime);        break;
     case SCENE_CUBE:     CubeScene_Render(demoTime);     break;
@@ -355,10 +361,12 @@ static DWORD SceneDurationMs(DemoSceneId id)
     {
     case SCENE_INTRO:    return INTRO_SCENE_MS;
     case SCENE_PLASMA:   return PLASMA_SCENE_MS;
+    case SCENE_BALL:     return BALL_SCENE_MS;
     case SCENE_RING:     return RING_SCENE_MS;
     case SCENE_GLASS:    return GLASS_SCENE_MS;
     case SCENE_CHROME:   return CHROME_SCENE_MS;
     case SCENE_GALAXY:   return GALAXY_SCENE_MS;
+	case SCENE_CRYSTAL:  return CRYSTAL_SCENE_MS;
     case SCENE_VURXDK:   return VURXDK_SCENE_MS;
     case SCENE_X:        return X_SCENE_MS;
     case SCENE_CUBE:     return CUBE_SCENE_MS;
