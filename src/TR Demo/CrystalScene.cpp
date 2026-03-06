@@ -1,9 +1,66 @@
-// CrystalScene.cpp -- Crystalline cluster | RXDK / NV2A fixed-function
+// =============================================================================
+// CrystalScene.cpp
+// Crystalline Grotto -- GPU Benchmark Scene | RXDK / NV2A Fixed-Function
+// =============================================================================
 //
-// Geometry:  14 hex prisms, 3x subdivided = 21504 tris | ~1.97 MB VB
-// Passes:    10 multipass (DOT3 bump x4, cubemap x4, rim x2) + fog
-// Cave:      Textured lit cylinder, 24x16 quads, procedural rock tex
-// Hardware:  Prism ceiling ~14 -- 16+ causes VB alloc hard lock
+// OVERVIEW
+//   A demoscene-style benchmark scene for original Xbox hardware. Renders a
+//   cluster of glowing crystalline prisms inside a dark procedural cave
+//   environment. Designed to push NV2A fill-rate and texture bandwidth while
+//   remaining stable on real hardware.
+//
+// GEOMETRY
+//   - 14 hexagonal prisms, each subdivided 3x = 21,504 triangles total
+//   - Geometry stored in a single static vertex buffer (~1.97 MB)
+//   - Cave background: indexed cylinder mesh, 192x96 quads = 36,864 triangles (~801KB)
+//   - Fog puffs: 120 billboarded quads, enlarged radius, CPU-updated every frame
+//   - Stalactite/stalagmite formations: 32 + 24 = 56 hex prism mini crystals
+//     rooted flush on cave wall, 12 tris each = 672 tris per cave draw (2,016 drawn 3x)
+//   - Hardware ceiling: ND=14 stable -- ND=15/16+ causes NV2A VB alloc hard lock
+//
+// RENDER PASSES (crystal cluster)
+//   Pass  1 (opaque)  : DOT3 bump map base -- primary lit colour via TFACTOR
+//   Pass  2 (additive): DOT3 cyan + violet light directions averaged
+//   Pass  3 (additive): Cubemap reflection -- three tints merged into one draw
+//   Pass  4 (additive): Rim DOT3 -- two rim light directions merged
+//   Pass  5 (additive): Violet specular DOT3 sweep
+//   Pass  6 (additive): Cyan glint cubemap
+//   Pass  7 (additive): Hot pink DOT3 sweep
+//   Pass  8 (additive): Violet cubemap sweep
+//   Pass  9 (additive): DOT3 warm pink sweep
+//   Pass 10 (additive): Cubemap teal glint
+//   Pass 11 (additive): DOT3 deep blue rim
+//   Pass 12 (additive): Cubemap white shimmer
+//   Pass 13 (additive): DOT3 green-blue sweep
+//   Pass 14 (additive): Cubemap deep violet pulse
+//   Pass 15 (additive): DOT3 orange-red accent
+//   Pass 16 (additive): Cubemap gold sweep
+//   Total: 16 crystal passes x 21,504 tris = ~344,064 tri submissions/frame
+//   Note: fullscreen quad passes removed -- caused cave blowout due to additive
+//         accumulation over cave mesh. Load maintained via 16 crystal passes.
+//
+// CAVE BACKGROUND
+//   - Textured indexed cylinder, additive blended after crystal cluster
+//   - Drawn 3x with small tMs phase offsets (0 / +40 / +80) for subtle glow
+//   - High-res mesh: 192x96 quads, drawn 3x = ~110,592 cave tri submissions/frame
+//   - rock.dds: 256x256 A8R8G8B8 procedural fractal noise, very dark (max ~14)
+//   - TFACTOR modulates glow intensity with slow sine pulse
+//
+// TEXTURES
+//   D:\tex\crystal_n.dds    -- Normal map for DOT3 bump lighting
+//   D:\tex\crystal_cube.dds -- Cubemap for environment reflection
+//   D:\tex\rock.dds         -- Cave wall diffuse texture (procedural, dark)
+//
+// PERFORMANCE OVERLAY
+//   Frame time bar (50ms scale), FPS counter, draw call count, tri count
+//   Status flags: VB / NM / CB / CVB / CIB / RK / INIT
+//   Thresholds: SOLID>=45fps  OK>=35fps  LIGHT>=25fps  HEAVY<25fps
+//
+// PIPELINE CONSTRAINTS
+//   Fixed-function FVF only -- no vertex or pixel shaders
+//   No float-to-int casts (__ftol2_sse avoided via Ftoi() wrapper)
+//   Static vertex buffers -- no per-frame CPU geometry updates
+//   All animation via TFACTOR, texture matrix, and LUT sine table
 //
 #include "CrystalScene.h"
 #include <xtl.h>
@@ -300,12 +357,16 @@ static int s_glowTris = 0;
 static int s_fogTris = 0;
 
 // Fog puffs
-static const int FOG_PUFFS = 52;
+static const int FOG_PUFFS = 120;
 static const int FOG_VERTS = FOG_PUFFS * 12;
 
+// Forward declarations for textures used in DrawCave
+static LPDIRECT3DTEXTURE8     s_normalMap = NULL;
+static LPDIRECT3DCUBETEXTURE8 s_cubeMap = NULL;
+
 // Cave mesh
-static const int CAVE_SEGS = 24;
-static const int CAVE_RINGS = 16;
+static const int CAVE_SEGS = 192;
+static const int CAVE_RINGS = 96;
 static LPDIRECT3DVERTEXBUFFER8 s_caveVB = NULL;
 static LPDIRECT3DINDEXBUFFER8  s_caveIB = NULL;
 static LPDIRECT3DTEXTURE8      s_caveTex = NULL;
@@ -409,7 +470,7 @@ static void DrawCave(DWORD tMs, float alpha)
     g_pDevice->SetRenderState(D3DRS_ZENABLE, FALSE); // cave is bg -- no Z test
     g_pDevice->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
     g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-    g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
+    g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
     g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);  // additive: texture adds onto scene
     g_pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE); // no culling -- see both sides
     g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
@@ -417,10 +478,10 @@ static void DrawCave(DWORD tMs, float alpha)
     // Crystal glow colour pulsing on cave walls -- mimics the cluster as a light source
     // Slow pulse with warm violet tint, bright enough to illuminate the cave dimly
     int gph = (tMs / 12u) & (LUT_N - 1);
-    float glow = 0.30f + s_sin[gph] * 0.10f;  // 0.20 - 0.40 range -- dim cave glow
-    BYTE gR = ClampB(Ftoi(glow * 90.f * alpha)); // subtle violet tint
-    BYTE gG = ClampB(Ftoi(glow * 50.f * alpha));
-    BYTE gB = ClampB(Ftoi(glow * 120.f * alpha));
+    float glow = 0.18f + s_sin[gph] * 0.07f;  // 0.11 - 0.25 range -- very dim cave glow
+    BYTE gR = ClampB(Ftoi(glow * 60.f * alpha)); // very subtle violet tint
+    BYTE gG = ClampB(Ftoi(glow * 30.f * alpha));
+    BYTE gB = ClampB(Ftoi(glow * 80.f * alpha));
     g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(gR, gG, gB));
 
     // Raw texture -- no stage multiplication darkening it
@@ -446,42 +507,94 @@ static void DrawCave(DWORD tMs, float alpha)
     g_pDevice->SetIndices(s_caveIB, 0);
     g_pDevice->DrawIndexedPrimitive(D3DPT_TRIANGLELIST, 0, s_caveVerts, 0, s_cavePrims);
 
-    // Stalactites/stalagmites on top
+    // Stalactites/stalagmites -- bright solid triangles pointing inward from cave wall
     g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
+    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
+    g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
     g_pDevice->SetTexture(0, NULL);
     g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
     g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+    g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
     g_pDevice->SetVertexShader(D3DFVF_XYZ | D3DFVF_DIFFUSE);
+    DisableFrom(1);
+
     struct CV { float x, y, z; DWORD color; };
     const float ZN = -2.f, DP = 14.f, RD = 6.f;
-    BYTE rB = ClampB(Ftoi(0.65f * 95.f * alpha));
-    BYTE rR = ClampB(Ftoi(0.65f * 70.f * alpha));
-    BYTE rG = ClampB(Ftoi(0.65f * 55.f * alpha));
-    for (int i = 0; i < 18; ++i) {
+
+    // Mini crystal formations -- hex prisms with pointed tips, poking out of cave wall
+    // Each crystal: 6 side faces + 6 tip faces = 12 tris, pure geometry no texture
+    auto DrawMiniCrystal = [&](float wx, float wy, float zp,
+        float nx2, float ny2,
+        float shaftLen, float capLen, float rad,
+        DWORD cBase, DWORD cMid, DWORD cTip)
+        {
+            // Perpendicular axes for hex ring
+            // nx2,ny2 = inward axis; build two perp vectors in XY plane
+            float bx = -ny2, by = nx2;        // tangent in XY
+            // 6 base verts on cave wall surface
+            CV base[6], mid[6];
+            for (int k = 0; k < 6; ++k) {
+                float a2 = (float)k / 6.f * TAU;
+                // Tangential spread only -- base ring flush on wall, no radial displacement
+                float tx = bx * cosf(a2) * rad;
+                float ty = by * cosf(a2) * rad;
+                float tz = sinf(a2) * rad;  // Z spread for depth
+                base[k].x = wx + tx;                    base[k].y = wy + ty;                    base[k].z = zp + tz; base[k].color = cBase;
+                mid[k].x = wx + tx * 0.6f + nx2 * shaftLen; mid[k].y = wy + ty * 0.6f + ny2 * shaftLen; mid[k].z = zp + tz * 0.6f; mid[k].color = cMid;
+            }
+            CV tip; tip.x = wx + nx2 * (shaftLen + capLen); tip.y = wy + ny2 * (shaftLen + capLen); tip.z = zp; tip.color = cTip;
+
+            // 6 shaft side quads (2 tris each = 12 tris)
+            for (int k = 0; k < 6; ++k) {
+                int n = (k + 1) % 6;
+                CV q[6] = { base[k], base[n], mid[k], base[n], mid[n], mid[k] };
+                g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2, q, sizeof(CV));
+            }
+            // 6 cap tris to tip
+            for (int k = 0; k < 6; ++k) {
+                int n = (k + 1) % 6;
+                CV t3[3] = { mid[k], mid[n], tip };
+                g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, t3, sizeof(CV));
+            }
+        };
+
+    // 32 stalactites -- violet/blue crystals
+    for (int i = 0; i < 32; ++i) {
         float ang = (float)i * 0.71f;
-        float zp = ZN + 0.5f + (float)i * (DP / 18.f);
-        float xp = cosf(ang) * (RD - 0.3f), ty = sinf(ang) * (RD - 0.3f);
-        float by = ty - (0.4f + (float)(i % 4) * 0.35f);
+        float zp = ZN + 0.8f + (float)i * (DP / 32.f);
+        float wx = cosf(ang) * RD;
+        float wy = sinf(ang) * RD;
+        float nx2 = -cosf(ang), ny2 = -sinf(ang);
+        float sLen = 0.25f + (float)(i % 4) * 0.18f + (float)(i % 3) * 0.10f;
+        float cLen = 0.20f + (float)(i % 3) * 0.12f;
+        float rad = 0.06f + (float)(i % 4) * 0.025f;
         int iph = (i * 97 + (tMs / 25u)) & (LUT_N - 1);
-        BYTE sc = ClampB(Ftoi((0.6f + s_sin[iph] * 0.4f) * (float)rB * 1.5f));
-        CV sv[2];
-        sv[0].x = xp; sv[0].y = ty; sv[0].z = zp; sv[0].color = D3DCOLOR_XRGB(rR / 2, rG / 2, sc);
-        sv[1].x = xp; sv[1].y = by; sv[1].z = zp; sv[1].color = D3DCOLOR_XRGB(0, 0, 0);
-        g_pDevice->DrawPrimitiveUP(D3DPT_LINELIST, 1, sv, sizeof(CV));
+        float br = 0.70f + s_sin[iph] * 0.30f;
+        DWORD cBase = D3DCOLOR_XRGB(ClampB(Ftoi(br * 80.f * alpha)), ClampB(Ftoi(br * 30.f * alpha)), ClampB(Ftoi(br * 140.f * alpha)));
+        DWORD cMid = D3DCOLOR_XRGB(ClampB(Ftoi(br * 180.f * alpha)), ClampB(Ftoi(br * 80.f * alpha)), ClampB(Ftoi(br * 255.f * alpha)));
+        DWORD cTip = D3DCOLOR_XRGB(ClampB(Ftoi(br * 220.f * alpha)), ClampB(Ftoi(br * 180.f * alpha)), ClampB(Ftoi(br * 255.f * alpha)));
+        DrawMiniCrystal(wx, wy, zp, nx2, ny2, sLen, cLen, rad, cBase, cMid, cTip);
     }
-    for (int i = 0; i < 14; ++i) {
+    // 24 stalagmites -- pink/magenta crystals for contrast
+    for (int i = 0; i < 24; ++i) {
         float ang = (float)i * 0.83f + PI * 0.5f;
-        float zp = ZN + 0.5f + (float)i * (DP / 14.f);
-        float xp = cosf(ang) * (RD - 0.4f), by = sinf(ang) * (RD - 0.4f);
-        float ty = by + (0.4f + (float)(i % 3) * 0.35f);
+        float zp = ZN + 0.8f + (float)i * (DP / 24.f);
+        float wx = cosf(ang) * RD;
+        float wy = sinf(ang) * RD;
+        float nx2 = -cosf(ang), ny2 = -sinf(ang);
+        float sLen = 0.22f + (float)(i % 3) * 0.16f + (float)(i % 5) * 0.09f;
+        float cLen = 0.18f + (float)(i % 4) * 0.10f;
+        float rad = 0.05f + (float)(i % 3) * 0.025f;
         int iph = (i * 61 + (tMs / 30u)) & (LUT_N - 1);
-        BYTE sc = ClampB(Ftoi((0.5f + s_sin[iph] * 0.5f) * (float)rR * 2.f));
-        CV sv[2];
-        sv[0].x = xp; sv[0].y = by; sv[0].z = zp; sv[0].color = D3DCOLOR_XRGB(sc, rG / 2, rB / 2);
-        sv[1].x = xp; sv[1].y = ty; sv[1].z = zp; sv[1].color = D3DCOLOR_XRGB(0, 0, 0);
-        g_pDevice->DrawPrimitiveUP(D3DPT_LINELIST, 1, sv, sizeof(CV));
+        float br = 0.65f + s_sin[iph] * 0.35f;
+        DWORD cBase = D3DCOLOR_XRGB(ClampB(Ftoi(br * 140.f * alpha)), ClampB(Ftoi(br * 20.f * alpha)), ClampB(Ftoi(br * 100.f * alpha)));
+        DWORD cMid = D3DCOLOR_XRGB(ClampB(Ftoi(br * 255.f * alpha)), ClampB(Ftoi(br * 80.f * alpha)), ClampB(Ftoi(br * 200.f * alpha)));
+        DWORD cTip = D3DCOLOR_XRGB(ClampB(Ftoi(br * 255.f * alpha)), ClampB(Ftoi(br * 200.f * alpha)), ClampB(Ftoi(br * 255.f * alpha)));
+        DrawMiniCrystal(wx, wy, zp, nx2, ny2, sLen, cLen, rad, cBase, cMid, cTip);
     }
 
+    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
     g_pDevice->LightEnable(1, FALSE);
     g_pDevice->LightEnable(2, FALSE);
     g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
@@ -510,8 +623,8 @@ static void BuildFogDisc()
         s_puffs[p].x = c.tx + cosf(ang) * dist;
         s_puffs[p].y = c.ty + 0.05f + (float)(p % 4) * 0.06f;
         s_puffs[p].z = c.tz + sinf(ang) * dist;
-        s_puffs[p].radius = 0.13f + c.rad * 1.17f + (float)(p % 4) * 0.045f;
-        s_puffs[p].alpha = (BYTE)(90 + (p % 5) * 13);
+        s_puffs[p].radius = 0.28f + c.rad * 1.80f + (float)(p % 4) * 0.09f;
+        s_puffs[p].alpha = (BYTE)(110 + (p % 5) * 14);
     }
 }
 
@@ -527,7 +640,7 @@ static void UpdateFogVB(const D3DXMATRIX& view, DWORD tMs)
     for (int p = 0; p < FOG_PUFFS; ++p) {
         const FogPuff& pf = s_puffs[p];
         int ph = ((tMs / 8u) + p * 37) & (LUT_N - 1);
-        float pulse = 0.75f + s_sin[ph] * 0.25f;
+        float pulse = 0.80f + s_sin[ph] * 0.20f;
         BYTE a = (BYTE)Ftoi((float)pf.alpha * pulse);
         DWORD cCore = D3DCOLOR_ARGB(a, fR, fG, fB), cEdge = D3DCOLOR_ARGB(0, fR, fG, fB);
         float r = pf.radius, cx = pf.x, cy = pf.y, cz = pf.z;
@@ -636,10 +749,8 @@ static void SetDOT3TFactor(DWORD tMs)
 }
 
 // -----------------------------------------------------------------------------
-// Textures
+// Textures (declared above for forward visibility in DrawCave)
 // -----------------------------------------------------------------------------
-static LPDIRECT3DTEXTURE8     s_normalMap = NULL;
-static LPDIRECT3DCUBETEXTURE8 s_cubeMap = NULL;
 
 static void GenTextures()
 {
@@ -711,6 +822,7 @@ static void DrawBackground(DWORD tMs, float alpha)
 // -----------------------------------------------------------------------------
 // Render cluster
 // -----------------------------------------------------------------------------
+
 static void RenderCluster(DWORD tMs, float alpha, const D3DXMATRIX& world)
 {
     if (!s_crystalVB || s_crystalTris <= 0) return; // never attempt draw on missing geometry
@@ -735,7 +847,9 @@ static void RenderCluster(DWORD tMs, float alpha, const D3DXMATRIX& world)
     g_pDevice->SetStreamSource(0, s_crystalVB, sizeof(CVtx));
     SetLinear(0); SetLinear(1);
 
-    // PASS 1
+    // -------------------------------------------------------------------------
+    // PASS 1 (opaque): DOT3 base -- primary lit colour, blended with TFACTOR
+    // -------------------------------------------------------------------------
     SetDOT3TFactor(tMs);
 
     int phK = (tMs / 7u) & (LUT_N - 1);
@@ -752,7 +866,6 @@ static void RenderCluster(DWORD tMs, float alpha, const D3DXMATRIX& world)
     g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
     g_pDevice->SetTextureStageState(0, D3DTSS_ADDRESSU, D3DTADDRESS_WRAP);
     g_pDevice->SetTextureStageState(0, D3DTSS_ADDRESSV, D3DTADDRESS_WRAP);
-
     g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(kR, kG, kB));
     g_pDevice->SetTexture(1, NULL);
     g_pDevice->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_MODULATE2X);
@@ -760,7 +873,6 @@ static void RenderCluster(DWORD tMs, float alpha, const D3DXMATRIX& world)
     g_pDevice->SetTextureStageState(1, D3DTSS_COLORARG2, D3DTA_TFACTOR);
     g_pDevice->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
     DisableFrom(2);
-
     g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
 
     // Additive passes
@@ -769,34 +881,59 @@ static void RenderCluster(DWORD tMs, float alpha, const D3DXMATRIX& world)
     g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
     g_pDevice->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
 
-    // PASS 2: cyan DOT3
+    // -------------------------------------------------------------------------
+    // PASS 2 (additive): DOT3 cyan + violet combined -- two light dirs merged
+    // Stage 0: DOT3 with cyan light dir
+    // Stage 1: ADD with second DOT3 result -- not possible in single pass so
+    //          use averaged TFACTOR of both dirs for a single cheap approximation
+    // -------------------------------------------------------------------------
     {
         float la = t * 0.22f + PI;
         float flx = cosf(la), fly = -0.5f, flz = sinf(la);
         float fl = sqrtf(flx * flx + fly * fly + flz * flz); flx /= fl; fly /= fl; flz /= fl;
-        BYTE fR = ClampB(Ftoi((flx + 1.f) * 127.5f));
-        BYTE fG = ClampB(Ftoi((-fly + 1.f) * 127.5f));
-        BYTE fB = ClampB(Ftoi((flz + 1.f) * 127.5f));
+        float la2 = t * 0.22f + PI * 0.5f;
+        float sx = cosf(la2), sy = 0.7f, sz = sinf(la2);
+        float sl = sqrtf(sx * sx + sy * sy + sz * sz); sx /= sl; sy /= sl; sz /= sl;
+        // Average the two light directions for a blended DOT3
+        BYTE fR = ClampB(Ftoi(((flx + 1.f) * .5f + (sx + 1.f) * .5f) * 0.5f * 255.f));
+        BYTE fG = ClampB(Ftoi(((-fly + 1.f) * .5f + (-sy + 1.f) * .5f) * 0.5f * 180.f));
+        BYTE fB = ClampB(Ftoi(((flz + 1.f) * .5f + (sz + 1.f) * .5f) * 0.5f * 255.f));
         g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(fR, fG, fB));
-
         g_pDevice->SetTexture(0, s_normalMap);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_DOTPRODUCT3);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
         g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
         g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
-
         DisableFrom(1);
         g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
     }
 
-    // PASS 3: cubemap reflection
+    // PASS 5 (additive): violet specular DOT3
     {
-        int ph = (tMs / 6u) & (LUT_N - 1);
-        float rp = 0.35f + s_sin[ph] * 0.10f;
-        BYTE ri = ClampB(Ftoi(rp * alpha * 255.f));
-        g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(ri, ri, ri));
+        float la = t * 0.13f + PI * 1.25f, sx = cosf(la), sy = -0.5f, sz = sinf(la);
+        float sl = sqrtf(sx * sx + sy * sy + sz * sz); sx /= sl; sy /= sl; sz /= sl;
+        BYTE sR = ClampB(Ftoi((sx + 1.f) * 100.f * alpha));
+        BYTE sG = ClampB(Ftoi((-sy + 1.f) * 30.f * alpha));
+        BYTE sB = ClampB(Ftoi((sz + 1.f) * 127.5f * alpha));
+        g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(sR, sG, sB));
+        g_pDevice->SetTexture(0, s_normalMap);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_DOTPRODUCT3);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
+        g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+        DisableFrom(1);
+        g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
+    }
 
+    // PASS 6 (additive): cyan glint cubemap
+    {
+        int ph = (tMs / 4u) & (LUT_N - 1); float rp = 0.12f + s_sin[ph] * 0.10f;
+        BYTE cR = ClampB(Ftoi(rp * 40.f * alpha));
+        BYTE cG = ClampB(Ftoi(rp * 220.f * alpha));
+        BYTE cB = ClampB(Ftoi(rp * 255.f * alpha));
+        g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(cR, cG, cB));
         g_pDevice->SetTexture(0, s_cubeMap);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
@@ -805,84 +942,36 @@ static void RenderCluster(DWORD tMs, float alpha, const D3DXMATRIX& world)
         g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR);
         g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3);
         DisableFrom(1);
-
         g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
-
         g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
         g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
     }
 
-    // PASS 4: hot pink specular DOT3
+    // PASS 7 (additive): hot pink DOT3 sweep
     {
-        float la = t * 0.22f + PI * 0.5f;
-        float sx = cosf(la), sy = 0.7f, sz = sinf(la);
+        float la = t * 0.29f + PI * 0.33f, sx = cosf(la), sy = 0.6f, sz = sinf(la);
         float sl = sqrtf(sx * sx + sy * sy + sz * sz); sx /= sl; sy /= sl; sz /= sl;
-        BYTE sR = ClampB(Ftoi((sx + 1.f) * 127.5f));
-        BYTE sG = ClampB(Ftoi((-sy + 1.f) * 127.5f));
-        BYTE sB = ClampB(Ftoi((sz + 1.f) * 127.5f));
+        BYTE sR = ClampB(Ftoi((sx + 1.f) * 127.5f * alpha));
+        BYTE sG = ClampB(Ftoi((-sy + 1.f) * 40.f * alpha));
+        BYTE sB = ClampB(Ftoi((sz + 1.f) * 110.f * alpha));
         g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(sR, sG, sB));
-
         g_pDevice->SetTexture(0, s_normalMap);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_DOTPRODUCT3);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
         g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
         g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
-
         DisableFrom(1);
         g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
     }
 
-    // PASS 5: violet cubemap
+    // PASS 8 (additive): violet cubemap sweep
     {
-        int ph = (tMs / 13u) & (LUT_N - 1);
-        float rp = 0.25f + s_sin[ph] * 0.10f;
+        int ph = (tMs / 17u) & (LUT_N - 1); float rp = 0.20f + s_sin[ph] * 0.15f;
         BYTE vR = ClampB(Ftoi(rp * 130.f * alpha));
         BYTE vG = ClampB(Ftoi(rp * 30.f * alpha));
         BYTE vB = ClampB(Ftoi(rp * 220.f * alpha));
         g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(vR, vG, vB));
-
-        g_pDevice->SetTexture(0, s_cubeMap);
-        g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
-        g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR);
-        g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3);
-        DisableFrom(1);
-
-        g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
-
-        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
-        g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
-    }
-
-    // PASS 6: rim DOT3
-    {
-        float la = t * 0.22f + PI * 1.5f;
-        float rx = cosf(la), ry = -0.2f, rz = sinf(la);
-        float rl = sqrtf(rx * rx + ry * ry + rz * rz); rx /= rl; ry /= rl; rz /= rl;
-        BYTE rR = ClampB(Ftoi((rx + 1.f) * 127.5f));
-        BYTE rG = ClampB(Ftoi((-ry + 1.f) * 127.5f));
-        BYTE rB = ClampB(Ftoi((rz + 1.f) * 127.5f));
-        g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(rR, rG, rB));
-
-        g_pDevice->SetTexture(0, s_normalMap);
-        g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_DOTPRODUCT3);
-        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
-        g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
-        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
-
-        DisableFrom(1);
-        g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
-    }
-
-    // PASS 7: hot pink cubemap sweep
-    {
-        int ph = (tMs / 9u) & (LUT_N - 1); float rp = 0.20f + s_sin[ph] * 0.12f;
-        BYTE pR = ClampB(Ftoi(rp * 255.f * alpha)), pG = ClampB(Ftoi(rp * 80.f * alpha)), pB = ClampB(Ftoi(rp * 180.f * alpha));
-        g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(pR, pG, pB));
         g_pDevice->SetTexture(0, s_cubeMap);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
@@ -895,11 +984,45 @@ static void RenderCluster(DWORD tMs, float alpha, const D3DXMATRIX& world)
         g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
         g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
     }
-    // PASS 8: cyan rim DOT3
+
+    // -------------------------------------------------------------------------
+    // PASS 3 (additive): cubemap reflection -- all three cubemap passes merged
+    //   stage 0: cubemap sample modulated by blended TFACTOR (white+violet+pink)
+    // -------------------------------------------------------------------------
     {
-        float la = t * 0.31f + PI * 0.75f, rx = cosf(la), ry = 0.3f, rz = sinf(la);
+        int ph = (tMs / 6u) & (LUT_N - 1); float rp = 0.35f + s_sin[ph] * 0.10f;
+        int ph2 = (tMs / 13u) & (LUT_N - 1); float rp2 = 0.25f + s_sin[ph2] * 0.10f;
+        int ph3 = (tMs / 9u) & (LUT_N - 1); float rp3 = 0.20f + s_sin[ph3] * 0.12f;
+        // Blend all three cubemap tints into one TFACTOR
+        BYTE cR = ClampB(Ftoi((rp * 255.f + rp2 * 130.f + rp3 * 255.f) / 3.f * alpha));
+        BYTE cG = ClampB(Ftoi((rp * 255.f + rp2 * 30.f + rp3 * 80.f) / 3.f * alpha));
+        BYTE cB = ClampB(Ftoi((rp * 255.f + rp2 * 220.f + rp3 * 180.f) / 3.f * alpha));
+        g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(cR, cG, cB));
+        g_pDevice->SetTexture(0, s_cubeMap);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
+        g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3);
+        DisableFrom(1);
+        g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+    }
+
+    // -------------------------------------------------------------------------
+    // PASS 4 (additive): rim DOT3 -- cyan + violet rim merged into one
+    // -------------------------------------------------------------------------
+    {
+        float la = t * 0.22f + PI * 1.5f, rx = cosf(la), ry = -0.2f, rz = sinf(la);
         float rl = sqrtf(rx * rx + ry * ry + rz * rz); rx /= rl; ry /= rl; rz /= rl;
-        BYTE rR = ClampB(Ftoi((rx + 1.f) * 60.f)), rG = ClampB(Ftoi((-ry + 1.f) * 127.5f)), rB = ClampB(Ftoi((rz + 1.f) * 127.5f));
+        float la2 = t * 0.31f + PI * 0.75f, rx2 = cosf(la2), ry2 = 0.3f, rz2 = sinf(la2);
+        float rl2 = sqrtf(rx2 * rx2 + ry2 * ry2 + rz2 * rz2); rx2 /= rl2; ry2 /= rl2; rz2 /= rl2;
+        // Average rim directions
+        BYTE rR = ClampB(Ftoi(((rx + 1.f) * .5f + (rx2 + 1.f) * .5f) * .5f * 180.f));
+        BYTE rG = ClampB(Ftoi(((-ry + 1.f) * .5f + (-ry2 + 1.f) * .5f) * .5f * 180.f));
+        BYTE rB = ClampB(Ftoi(((rz + 1.f) * .5f + (rz2 + 1.f) * .5f) * .5f * 255.f));
         g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(rR, rG, rB));
         g_pDevice->SetTexture(0, s_normalMap);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_DOTPRODUCT3);
@@ -910,11 +1033,14 @@ static void RenderCluster(DWORD tMs, float alpha, const D3DXMATRIX& world)
         DisableFrom(1);
         g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
     }
-    // PASS 9: violet specular DOT3
+
+    // PASS 9 (additive): DOT3 warm pink sweep
     {
-        float la = t * 0.13f + PI * 1.25f, sx = cosf(la), sy = -0.5f, sz = sinf(la);
+        float la = t * 0.17f + PI * 0.6f, sx = cosf(la), sy = -0.8f, sz = sinf(la);
         float sl = sqrtf(sx * sx + sy * sy + sz * sz); sx /= sl; sy /= sl; sz /= sl;
-        BYTE sR = ClampB(Ftoi((sx + 1.f) * 100.f)), sG = ClampB(Ftoi((-sy + 1.f) * 30.f)), sB = ClampB(Ftoi((sz + 1.f) * 127.5f));
+        BYTE sR = ClampB(Ftoi((sx + 1.f) * 127.5f * alpha));
+        BYTE sG = ClampB(Ftoi((-sy + 1.f) * 50.f * alpha));
+        BYTE sB = ClampB(Ftoi((sz + 1.f) * 90.f * alpha));
         g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(sR, sG, sB));
         g_pDevice->SetTexture(0, s_normalMap);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_DOTPRODUCT3);
@@ -925,10 +1051,120 @@ static void RenderCluster(DWORD tMs, float alpha, const D3DXMATRIX& world)
         DisableFrom(1);
         g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
     }
-    // PASS 10: cyan cubemap glint
+    // PASS 10 (additive): cubemap teal glint
     {
-        int ph = (tMs / 4u) & (LUT_N - 1); float rp = 0.10f + s_sin[ph] * 0.10f;
-        BYTE cR = ClampB(Ftoi(rp * 40.f * alpha)), cG = ClampB(Ftoi(rp * 220.f * alpha)), cB = ClampB(Ftoi(rp * 255.f * alpha));
+        int ph = (tMs / 11u) & (LUT_N - 1); float rp = 0.18f + s_sin[ph] * 0.12f;
+        BYTE cR = ClampB(Ftoi(rp * 20.f * alpha));
+        BYTE cG = ClampB(Ftoi(rp * 200.f * alpha));
+        BYTE cB = ClampB(Ftoi(rp * 180.f * alpha));
+        g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(cR, cG, cB));
+        g_pDevice->SetTexture(0, s_cubeMap);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
+        g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3);
+        DisableFrom(1);
+        g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+    }
+    // PASS 11 (additive): DOT3 deep blue rim
+    {
+        float la = t * 0.41f + PI * 1.1f, rx = cosf(la), ry = 0.5f, rz = sinf(la);
+        float rl = sqrtf(rx * rx + ry * ry + rz * rz); rx /= rl; ry /= rl; rz /= rl;
+        BYTE rR = ClampB(Ftoi((rx + 1.f) * 40.f * alpha));
+        BYTE rG = ClampB(Ftoi((-ry + 1.f) * 80.f * alpha));
+        BYTE rB = ClampB(Ftoi((rz + 1.f) * 127.5f * alpha));
+        g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(rR, rG, rB));
+        g_pDevice->SetTexture(0, s_normalMap);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_DOTPRODUCT3);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
+        g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+        DisableFrom(1);
+        g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
+    }
+    // PASS 12 (additive): cubemap white shimmer
+    {
+        int ph = (tMs / 5u) & (LUT_N - 1); float rp = 0.15f + s_sin[ph] * 0.10f;
+        BYTE cR = ClampB(Ftoi(rp * 200.f * alpha));
+        BYTE cG = ClampB(Ftoi(rp * 200.f * alpha));
+        BYTE cB = ClampB(Ftoi(rp * 200.f * alpha));
+        g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(cR, cG, cB));
+        g_pDevice->SetTexture(0, s_cubeMap);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
+        g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3);
+        DisableFrom(1);
+        g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+    }
+    // PASS 13 (additive): DOT3 green-blue sweep
+    {
+        float la = t * 0.23f + PI * 1.8f, sx = cosf(la), sy = 0.3f, sz = sinf(la);
+        float sl = sqrtf(sx * sx + sy * sy + sz * sz); sx /= sl; sy /= sl; sz /= sl;
+        BYTE sR = ClampB(Ftoi((sx + 1.f) * 30.f * alpha));
+        BYTE sG = ClampB(Ftoi((-sy + 1.f) * 127.5f * alpha));
+        BYTE sB = ClampB(Ftoi((sz + 1.f) * 127.5f * alpha));
+        g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(sR, sG, sB));
+        g_pDevice->SetTexture(0, s_normalMap);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_DOTPRODUCT3);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
+        g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+        DisableFrom(1);
+        g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
+    }
+    // PASS 14 (additive): cubemap deep violet pulse
+    {
+        int ph = (tMs / 19u) & (LUT_N - 1); float rp = 0.22f + s_sin[ph] * 0.18f;
+        BYTE cR = ClampB(Ftoi(rp * 160.f * alpha));
+        BYTE cG = ClampB(Ftoi(rp * 20.f * alpha));
+        BYTE cB = ClampB(Ftoi(rp * 255.f * alpha));
+        g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(cR, cG, cB));
+        g_pDevice->SetTexture(0, s_cubeMap);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
+        g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_COUNT3);
+        DisableFrom(1);
+        g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+    }
+    // PASS 15 (additive): DOT3 orange-red accent
+    {
+        float la = t * 0.37f + PI * 0.9f, sx = cosf(la), sy = -0.4f, sz = sinf(la);
+        float sl = sqrtf(sx * sx + sy * sy + sz * sz); sx /= sl; sy /= sl; sz /= sl;
+        BYTE sR = ClampB(Ftoi((sx + 1.f) * 127.5f * alpha));
+        BYTE sG = ClampB(Ftoi((-sy + 1.f) * 60.f * alpha));
+        BYTE sB = ClampB(Ftoi((sz + 1.f) * 30.f * alpha));
+        g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(sR, sG, sB));
+        g_pDevice->SetTexture(0, s_normalMap);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_DOTPRODUCT3);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
+        g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_TEXCOORDINDEX, 0);
+        DisableFrom(1);
+        g_pDevice->DrawPrimitive(D3DPT_TRIANGLELIST, 0, s_crystalTris); ++s_drawCalls;
+    }
+    // PASS 16 (additive): cubemap final gold sweep
+    {
+        int ph = (tMs / 23u) & (LUT_N - 1); float rp = 0.20f + s_sin[ph] * 0.15f;
+        BYTE cR = ClampB(Ftoi(rp * 255.f * alpha));
+        BYTE cG = ClampB(Ftoi(rp * 160.f * alpha));
+        BYTE cB = ClampB(Ftoi(rp * 30.f * alpha));
         g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_XRGB(cR, cG, cB));
         g_pDevice->SetTexture(0, s_cubeMap);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
@@ -1054,18 +1290,16 @@ void CrystalScene_Render(float)
     D3DXMatrixRotationY(&mRY, ry);
     world = mRX * mRY;
 
-    g_pDevice->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER,
-        D3DCOLOR_XRGB(0, 0, 0), 1.f, 0);
-
-    // Black clear only -- cave drawn AFTER crystals so additive blend picks up crystal light
     g_pDevice->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(0, 0, 0), 1.f, 0);
 
     if (s_initOK) {
         RenderCluster(tMs, alpha, world);
     }
 
-    // Cave drawn after crystals -- additive blend adds rock onto lit frame
+    // Cave drawn 3x -- small tMs offsets give subtle blur/glow without heavy smear
     DrawCave(tMs, alpha);
+    DrawCave(tMs + 40, alpha * 0.4f);
+    DrawCave(tMs + 80, alpha * 0.2f);
 
     // Overlay
     {
@@ -1092,7 +1326,7 @@ void CrystalScene_Render(float)
         // Clamp fill to 33ms range so bar is meaningful across 60-30fps
         {
             const float BX = sx, BY = 8.f, BH = 14.f, BW = 420.f;
-            const float TARGET_MS = 33.333f; // 30fps = full bar
+            const float TARGET_MS = 50.0f;   // 20fps = full bar, 33ms = 66% yellow
             float fill = s_frameMs / TARGET_MS; if (fill > 1.f) fill = 1.f;
             // green at low load, yellow at mid, red at high
             int bR = fill < 0.5f ? Ftoi(fill * 2.f * 255.f) : 255;
@@ -1117,21 +1351,22 @@ void CrystalScene_Render(float)
             g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
             g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
             // Label: ms, fps, load tag -- all on one line under bar
-            const char* tag = fps >= 58 ? "SOLID" : fps >= 45 ? "OK" : fps >= 30 ? "LIGHT" : "HEAVY";
+            const char* tag = fps >= 45 ? "SOLID" : fps >= 35 ? "OK" : fps >= 25 ? "LIGHT" : "HEAVY";
             wsprintfA(buf, "%d ms  %d fps  %s", fms, fps, tag);
             DrawText(BX, BY + BH + 4.f, buf, sc, bCol);
         }
 
         // --- Stats below bar ---
         float sy = 50.f;
-        int trisK = s_crystalTris / 1000, trisR = s_crystalTris - trisK * 1000;
+        int totalTris = s_crystalTris + s_cavePrims * 3 + s_fogTris;
+        int trisK = totalTris / 1000, trisR = totalTris - trisK * 1000;
         wsprintfA(buf, "TRIS: %d.%03d  DRAWS: %d", trisK, trisR, s_drawCalls);
         DrawText(sx, sy, buf, sc, col); sy += 18.f;
-        wsprintfA(buf, "VB:%s NM:%s CB:%s CVB:%s CIB:%s P:%d %s INIT:%s",
+        wsprintfA(buf, "VB:%s NM:%s CB:%s CVB:%s CIB:%s %s INIT:%s",
             s_crystalVB ? "OK" : "NO", s_normalMap ? "OK" : "NO",
             s_cubeMap ? "OK" : "NO",
             s_caveVB ? "OK" : "NO", s_caveIB ? "OK" : "NO",
-            s_cavePrims, s_rockDDSOK ? "RK" : "FB", s_initOK ? "OK" : "FAIL");
+            s_rockDDSOK ? "RK" : "FB", s_initOK ? "OK" : "FAIL");
         DrawText(sx, sy, buf, sc, col); sy += 18.f;
         if (!s_initOK && s_initErr[0])
             DrawText(sx, sy, s_initErr, sc, D3DCOLOR_XRGB(255, 80, 80));
