@@ -1,4 +1,4 @@
-// BallScene.cpp - Advanced bouncing ball physics with DX8 effects showcase
+ï»¿// BallScene.cpp - Advanced bouncing ball physics with DX8 effects showcase
 // Demonstrates:
 // - Vertex shader deformation (squash & stretch)
 // - Multiple material types (chrome, glass, rubber, plasma)
@@ -28,7 +28,7 @@ static const float SCREEN_H = 480.0f;
 
 static const int MAX_BALLS = 16;
 static const float GRAVITY = 980.0f;       // pixels/sec^2
-static const float FLOOR_Y = 420.0f;
+static const float FLOOR_Y = 370.0f;
 
 // Sphere mesh resolution
 static const int SPHERE_SLICES = 24;
@@ -180,6 +180,16 @@ static float SqrtSafe(float v)
     return (v <= 0.0f) ? 0.0f : sqrtf(v);
 }
 
+static __declspec(noinline) int Ftoi(float f)
+{
+    int i;
+    __asm {
+        fld   f
+        fistp i
+    }
+    return i;
+}
+
 // -----------------------------------------------------------------------------
 // Sphere mesh generation
 // -----------------------------------------------------------------------------
@@ -270,7 +280,7 @@ static void CreateSphereMesh()
 
 static float MaterialDensity(MaterialType mat)
 {
-    // “Weight feel” knob: higher => heavier for same radius.
+    // ï¿½Weight feelï¿½ knob: higher => heavier for same radius.
     // (2D sim uses area ~ r^2, so density scales mass nicely.)
     switch (mat)
     {
@@ -323,7 +333,7 @@ static void SpawnBall(float x, float y, float vx, float vy, float radius, Materi
         break;
     case MAT_GLASS:
         b.baseColor = D3DCOLOR_ARGB(128, 150, 200, 255);
-        b.restitution = 0.65f;   // hard bounce, but not “springy”
+        b.restitution = 0.65f;   // hard bounce, but not ï¿½springyï¿½
         b.friction = 0.97f;      // smooth
         break;
     case MAT_PLASMA:
@@ -497,7 +507,7 @@ static void UpdatePhysics(float dt)
             if (velAlongNormal > 0.0f)
                 continue;
 
-            // Restitution: mix (use the “bouncier limit” but keep stable)
+            // Restitution: mix (use the ï¿½bouncier limitï¿½ but keep stable)
             float e = (a.restitution < b.restitution) ? a.restitution : b.restitution;
 
             // Impulse scalar
@@ -565,20 +575,134 @@ static void UpdatePhysics(float dt)
 
 static void DrawFloor()
 {
-    // Simple gradient floor
     struct FV { float x, y, z, rhw; DWORD c; };
-    FV quad[4] =
-    {
-        { 0.0f,     FLOOR_Y, 0.0f, 1.0f, D3DCOLOR_XRGB(40, 40, 50) },
-        { SCREEN_W, FLOOR_Y, 0.0f, 1.0f, D3DCOLOR_XRGB(40, 40, 50) },
-        { 0.0f,     SCREEN_H, 0.0f, 1.0f, D3DCOLOR_XRGB(20, 20, 25) },
-        { SCREEN_W, SCREEN_H, 0.0f, 1.0f, D3DCOLOR_XRGB(20, 20, 25) },
-    };
 
     g_pDevice->SetTexture(0, NULL);
     g_pDevice->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
     g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
+    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+
+    // Base floor gradient
+    FV quad[4] =
+    {
+        { 0.0f,     FLOOR_Y,  0.0f, 1.0f, D3DCOLOR_XRGB(30, 35, 50) },
+        { SCREEN_W, FLOOR_Y,  0.0f, 1.0f, D3DCOLOR_XRGB(30, 35, 50) },
+        { 0.0f,     SCREEN_H, 0.0f, 1.0f, D3DCOLOR_XRGB(15, 18, 26) },
+        { SCREEN_W, SCREEN_H, 0.0f, 1.0f, D3DCOLOR_XRGB(15, 18, 26) },
+    };
     g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(FV));
+
+    // Perspective grid -- vanishing point sits above FLOOR_Y to create
+    // the illusion of a receding floor the balls bounce on
+    const float VP_X = SCREEN_W * 0.5f;
+    const float VP_Y = FLOOR_Y - 40.0f;  // horizon sits 40px above floor join
+    const float BOTTOM = SCREEN_H;
+    const int   N_VERT = 13;
+    const int   N_HORIZ = 7;
+
+    // Radiating lines from vanishing point to bottom edge
+    for (int i = 0; i < N_VERT; ++i)
+    {
+        float t = (float)i / (float)(N_VERT - 1);
+        float bx = t * SCREEN_W;           // bottom x spread full width
+        // Alpha fades toward edges so center lines are brightest
+        float edge = 1.0f - fabsf(t - 0.5f) * 2.0f;
+        int   a = Ftoi(edge * 110.f + 40.f);
+        DWORD col = D3DCOLOR_ARGB(a, 90, 115, 160);
+
+        FV line[2] =
+        {
+            { VP_X, VP_Y,   0.0f, 1.0f, D3DCOLOR_ARGB(0,  90, 115, 160) },
+            { bx,   BOTTOM, 0.0f, 1.0f, col },
+        };
+        g_pDevice->DrawPrimitiveUP(D3DPT_LINELIST, 1, line, sizeof(FV));
+    }
+
+    // Horizontal lines -- spaced with perspective foreshortening
+    // Lines bunch up near VP_Y and spread out near bottom
+    for (int i = 1; i <= N_HORIZ; ++i)
+    {
+        // Quadratic spacing: close together near top, far apart near bottom
+        float ft = (float)i / (float)(N_HORIZ + 1);
+        float y = VP_Y + (BOTTOM - VP_Y) * (ft * ft);
+
+        // Width at this y via linear interpolation from vanishing point
+        float frac = (y - VP_Y) / (BOTTOM - VP_Y);
+        float half = frac * SCREEN_W * 0.5f;
+        float x0 = VP_X - half;
+        float x1 = VP_X + half;
+
+        // Alpha increases toward bottom (closer = more visible)
+        int a = Ftoi(frac * 100.f + 30.f);
+        DWORD col = D3DCOLOR_ARGB(a, 90, 115, 160);
+
+        FV line[2] =
+        {
+            { x0, y, 0.0f, 1.0f, col },
+            { x1, y, 0.0f, 1.0f, col },
+        };
+        g_pDevice->DrawPrimitiveUP(D3DPT_LINELIST, 1, line, sizeof(FV));
+    }
+
+    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+}
+
+// Draw an ellipse shadow on the floor for a single ball.
+// Shadow shrinks and fades as the ball rises above the floor.
+static void DrawBallShadow(const Ball& ball)
+{
+    // Distance from ball center to floor
+    float height = FLOOR_Y - ball.y;
+    if (height < 0.0f) height = 0.0f;
+
+    // t=1 when ball is on floor, t=0 when at top of screen
+    const float MAX_HEIGHT = 300.0f;
+    float t = 1.0f - Clamp(height / MAX_HEIGHT, 0.0f, 1.0f);
+
+    int alpha = Ftoi(t * t * 200.f);
+    if (alpha < 2) return;
+
+    // Shadow width tracks ball radius, squashes on impact, shrinks with height
+    float sw = ball.radius * (0.8f + 0.2f * t) * ball.squashX;
+    float sh = sw * 0.25f;    // always a flat ellipse regardless of height
+
+    float cx = ball.x;
+    float cy = FLOOR_Y - 1.0f;    // 1px above floor to avoid z-fighting
+
+    const int SEGS = 20;
+    struct FV { float x, y, z, rhw; DWORD c; };
+    FV fan[SEGS + 2];
+
+    // Dark shadow with slight blue tint to blend with floor aesthetic
+    DWORD centerCol = D3DCOLOR_ARGB(alpha, 0, 0, 8);
+    DWORD edgeCol = D3DCOLOR_ARGB(0, 0, 0, 8);
+
+    fan[0].x = cx - 0.5f;  fan[0].y = cy - 0.5f;
+    fan[0].z = 0.0f;        fan[0].rhw = 1.0f;
+    fan[0].c = centerCol;
+
+    for (int i = 0; i <= SEGS; ++i)
+    {
+        float a = 3.14159f * 2.0f * (float)i / (float)SEGS;
+        fan[i + 1].x = cx + cosf(a) * sw - 0.5f;
+        fan[i + 1].y = cy + sinf(a) * sh - 0.5f;
+        fan[i + 1].z = 0.0f;
+        fan[i + 1].rhw = 1.0f;
+        fan[i + 1].c = edgeCol;
+    }
+
+    g_pDevice->SetTexture(0, NULL);
+    g_pDevice->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
+    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+
+    g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLEFAN, SEGS, fan, sizeof(FV));
+
+    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 }
 
 static void DrawBackground()
@@ -586,10 +710,10 @@ static void DrawBackground()
     struct BV { float x, y, z, rhw; DWORD c; };
     BV quad[4] =
     {
-        { 0.0f,     0.0f,     0.0f, 1.0f, D3DCOLOR_XRGB(30, 35, 50) },
-        { SCREEN_W, 0.0f,     0.0f, 1.0f, D3DCOLOR_XRGB(30, 35, 50) },
-        { 0.0f,     FLOOR_Y,  0.0f, 1.0f, D3DCOLOR_XRGB(50, 60, 80) },
-        { SCREEN_W, FLOOR_Y,  0.0f, 1.0f, D3DCOLOR_XRGB(50, 60, 80) },
+        { 0.0f,     0.0f,    0.0f, 1.0f, D3DCOLOR_XRGB(25, 30, 45) },
+        { SCREEN_W, 0.0f,    0.0f, 1.0f, D3DCOLOR_XRGB(25, 30, 45) },
+        { 0.0f,     FLOOR_Y, 0.0f, 1.0f, D3DCOLOR_XRGB(30, 35, 50) },
+        { SCREEN_W, FLOOR_Y, 0.0f, 1.0f, D3DCOLOR_XRGB(30, 35, 50) },
     };
 
     g_pDevice->SetTexture(0, NULL);
@@ -661,22 +785,39 @@ static void RenderBall(const Ball& ball)
 
     // Lighting
     g_pDevice->SetRenderState(D3DRS_LIGHTING, TRUE);
-    g_pDevice->SetRenderState(D3DRS_AMBIENT, D3DCOLOR_XRGB(50, 50, 60));
+    // NORMALIZENORMALS is critical -- world matrix scales normals by ball.radius
+    // which kills lighting without this. Forces GPU to re-normalize after transform.
+    g_pDevice->SetRenderState(D3DRS_NORMALIZENORMALS, TRUE);
+    g_pDevice->SetRenderState(D3DRS_AMBIENT, D3DCOLOR_XRGB(80, 80, 95));
     g_pDevice->SetRenderState(D3DRS_SPECULARENABLE,
         (ball.material == MAT_CHROME || ball.material == MAT_GLASS) ? TRUE : FALSE);
 
-    // Simple directional light
+    // Directional light -- in ortho screen-space Y is flipped so positive Y = down.
+    // Light comes from upper-left: X slightly right, Y positive (downward = from top),
+    // Z into screen. This correctly illuminates the top-left of each sphere.
     D3DLIGHT8 light;
     ZeroMemory(&light, sizeof(light));
     light.Type = D3DLIGHT_DIRECTIONAL;
     light.Diffuse.r = 1.0f;
-    light.Diffuse.g = 1.0f;
-    light.Diffuse.b = 1.0f;
+    light.Diffuse.g = 0.95f;
+    light.Diffuse.b = 0.85f;
     light.Specular = light.Diffuse;
-    light.Direction = D3DXVECTOR3(0.3f, -0.7f, -0.3f);
+    light.Direction = D3DXVECTOR3(-0.4f, 0.7f, 0.6f);   // upper-left, into screen
 
     g_pDevice->SetLight(0, &light);
     g_pDevice->LightEnable(0, TRUE);
+
+    // Soft fill light from lower-right (complementary blue tint)
+    D3DLIGHT8 fill;
+    ZeroMemory(&fill, sizeof(fill));
+    fill.Type = D3DLIGHT_DIRECTIONAL;
+    fill.Diffuse.r = 0.15f;
+    fill.Diffuse.g = 0.20f;
+    fill.Diffuse.b = 0.35f;
+    fill.Direction = D3DXVECTOR3(0.5f, -0.5f, 0.3f);   // lower-right
+
+    g_pDevice->SetLight(1, &fill);
+    g_pDevice->LightEnable(1, TRUE);
 
     // Alpha blending for glass
     if (ball.material == MAT_GLASS)
@@ -705,7 +846,11 @@ static void RenderBall(const Ball& ball)
     g_pDevice->SetIndices(s_sphereIB, 0);
     g_pDevice->DrawIndexedPrimitive(D3DPT_TRIANGLELIST, 0, s_sphereVertCount, 0, s_sphereIndexCount / 3);
 
+    // Clean up lights
+    g_pDevice->LightEnable(0, FALSE);
+    g_pDevice->LightEnable(1, FALSE);
     g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+    g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
 }
 
 static void DrawStats()
@@ -821,6 +966,13 @@ void BallScene_Render()
 
     DrawBackground();
     DrawFloor();
+
+    // Shadow pass -- drawn on floor before balls so balls render on top
+    for (int i = 0; i < s_ballCount; ++i)
+    {
+        if (s_balls[i].active)
+            DrawBallShadow(s_balls[i]);
+    }
 
     // Render all balls
     for (int i = 0; i < s_ballCount; ++i)
