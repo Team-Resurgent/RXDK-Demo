@@ -17,17 +17,18 @@ the RXDK environment.
 
  ## RXDK Demos
 
-- IntroScene - Opening title/logo sequence
+- IntroScene - Opening title/logo sequence (new)
 - ChromeScene - A DXT1/DXT5 bump mapping sample with diffuse lighting and UV ripple
 - PlasmaScene - Fullscreen animated plasma effect with swirling color patterns and camera drift
-- BallScene - Physics demo with bouncing balls featuring squash/stretch deformation and multiple materials (rubber, chrome, glass, plasma)
+- BallScene - Physics demo with bouncing balls featuring squash/stretch deformation and multiple materials (rubber, chrome, glass, plasma) [New Look]
 - RingScene - Animated ring/torus geometry effects
-- GlassScene - Staind glass inspired scene showing off CPU based vertex shading a DOT3 PS shading.
+- GlassScene - Stained glass-inspired scene showing off CPU-based vertex shading and DOT3 PS shading.
 - GalaxyScene - Procedural space scene with stars, nebulae, and dust particles with stats overlay
+- CrystalScene -  GPU-intensive cave grotto filled with luminous hex crystal formations, rendered with multi-pass DOT3 bump mapping and cubemap reflections.
 - VURXDKScene - Large wireframe "RXDK" letters with music-reactive VU meter fills
 - XScene - Xbox logo visualization
 - CubeScene - Spinning cube with Matrix-style "RXDK" text rain on all 6 faces
-- CuveEnvScene - A spinning cube with environment  mapping and  with an XBOX themed space background
+- CuveEnvScene - A spinning cube with environment  mapping and  with an Xbox-themed space background
 - DripScene - Interactive water ripple simulation with multi-layer shading, rain mode, and realistic physics
 - MazeScene - A cel-shaded Windows 95-like maze
 - PostFXScene - Various PostFX samples such as lenswarping, vignette, heat warping, and a few other techniques to appear as a black hole 
