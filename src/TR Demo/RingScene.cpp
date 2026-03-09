@@ -4,11 +4,23 @@
 // Textured ring uses D:\metal.dds
 
 #include "RingScene.h"
+#include "music.h"
 #include <xtl.h>
 #include <xgraphics.h>
 #include <math.h>
 
 extern LPDIRECT3DDEVICE8 g_pDevice;
+
+// Avoid __ftol2_sse on Xbox
+static __declspec(noinline) int Ftoi(float f)
+{
+    int i;
+    __asm {
+        fld   f
+        fistp i
+    }
+    return i;
+}
 
 // -----------------------------------------------------------------------------
 // Scene constants
@@ -33,6 +45,47 @@ static LPDIRECT3DTEXTURE8 s_tex = nullptr;
 
 // Simple integer tick for animation (no float->int helpers)
 static int s_tick = 0;
+
+// Last VU bass level for ring scale pulse
+static int s_vuBass = 0;
+
+// -----------------------------------------------------------------------------
+// Lighting setup helper
+// -----------------------------------------------------------------------------
+
+// Sets a directional key light + fill light + ambient for the rings.
+// vuBass 0-255 drives specular brightness pulse.
+static void SetupRingLighting(int vuBass)
+{
+    g_pDevice->SetRenderState(D3DRS_LIGHTING, TRUE);
+    g_pDevice->SetRenderState(D3DRS_SPECULARENABLE, TRUE);
+    g_pDevice->SetRenderState(D3DRS_NORMALIZENORMALS, TRUE);
+
+    // Ambient: warm dark blue so shadow faces aren't pure black
+    g_pDevice->SetRenderState(D3DRS_AMBIENT,
+        D3DCOLOR_XRGB(30, 30, 55));
+
+    // Key light — warm white from upper-left
+    D3DLIGHT8 key;
+    ZeroMemory(&key, sizeof(key));
+    key.Type = D3DLIGHT_DIRECTIONAL;
+    key.Direction = D3DXVECTOR3(-0.5f, 0.7f, 0.5f);
+    key.Diffuse.r = 1.0f;  key.Diffuse.g = 0.95f; key.Diffuse.b = 0.85f;
+    // Specular pulse: full white boosted by bass
+    float spec = 0.6f + (vuBass * 0.4f) / 255.f;
+    key.Specular.r = spec;  key.Specular.g = spec;  key.Specular.b = spec;
+    g_pDevice->SetLight(0, &key);
+    g_pDevice->LightEnable(0, TRUE);
+
+    // Fill light — cool blue from lower-right
+    D3DLIGHT8 fill;
+    ZeroMemory(&fill, sizeof(fill));
+    fill.Type = D3DLIGHT_DIRECTIONAL;
+    fill.Direction = D3DXVECTOR3(0.5f, -0.4f, -0.3f);
+    fill.Diffuse.r = 0.15f; fill.Diffuse.g = 0.20f; fill.Diffuse.b = 0.40f;
+    g_pDevice->SetLight(1, &fill);
+    g_pDevice->LightEnable(1, TRUE);
+}
 
 // -----------------------------------------------------------------------------
 // Small helpers
@@ -360,10 +413,23 @@ void RingScene_Render(float demoTime)
 
     float fade = FadeAlpha(t);
 
-    // Advance integer tick for RGB / movement
     s_tick++;
 
+    // -------------------------------------------------------------------------
+    // Music VU — bass drives ring scale pulse, overall drives lattice brightness
+    // -------------------------------------------------------------------------
+    int vu[4] = { 0, 0, 0, 0 };
+    if (Music_IsPlaying())
+        Music_GetVULevels(vu);
+    s_vuBass = vu[0];
+    int vuOverall = vu[3];
+
+    // Bass pulse: scale factor 1.0 .. 1.08
+    float bassPulse = 1.0f + (s_vuBass * 0.08f) / 255.f;
+
+    // -------------------------------------------------------------------------
     // Camera
+    // -------------------------------------------------------------------------
     float camR = 5.5f - (t * 0.05f);
     float camA = t * 0.7f;
     float camY = sinf(t * 0.3f) * 0.4f;
@@ -384,115 +450,156 @@ void RingScene_Render(float demoTime)
     g_pDevice->SetTransform(D3DTS_PROJECTION, &mProj);
 
     // -------------------------------------------------------------------------
-    // Background lattice (neon green sphere behind everything)
+    // Background lattice — colour shifts with VU overall level
     // -------------------------------------------------------------------------
     DrawSphericalLattice(t);
 
     // -------------------------------------------------------------------------
-    // Draw Rings
+    // Setup stream/indices for torus mesh
     // -------------------------------------------------------------------------
-
-    const float RING_OFFSET = 1.8f; // left/right spacing
-
     g_pDevice->SetStreamSource(0, s_vb, sizeof(TorusVertex));
     g_pDevice->SetIndices(s_ib, 0);
     g_pDevice->SetVertexShader(FVF_TORUS);
 
-    // Reset basic texture stage
-    g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
-    g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+    // Rings drift apart and together over scene lifetime
+    float drift = sinf(t * 0.4f) * 0.5f;   // ±0.5 convergence
+    float offset = 1.8f + drift;
 
-    // *** Ring 1 - WIREFRAME (left) ***
+    // -------------------------------------------------------------------------
+    // Lighting on for solid rings
+    // -------------------------------------------------------------------------
+    SetupRingLighting(s_vuBass);
+
+    // *** Ring 1 — WIREFRAME (left), compound Y + slow Z tilt ***
     {
+        // Lighting off for wireframe — it would look noisy
+        g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
         g_pDevice->SetRenderState(D3DRS_FILLMODE, D3DFILL_WIREFRAME);
         g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
         g_pDevice->SetTexture(0, NULL);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
 
-        D3DXMATRIX mRot, mTrans, mWorld;
-        D3DXMatrixRotationY(&mRot, t * 1.5f);
-        D3DXMatrixTranslation(&mTrans, -RING_OFFSET, 0.0f, 0.0f);
-        D3DXMatrixMultiply(&mWorld, &mRot, &mTrans);
+        // Compound rotation: Y spin + slow Z precession
+        D3DXMATRIX mRotY, mRotZ, mScale, mTrans, mTmp, mWorld;
+        D3DXMatrixRotationY(&mRotY, t * 1.5f);
+        D3DXMatrixRotationZ(&mRotZ, t * 0.35f);
+        D3DXMatrixScaling(&mScale, bassPulse, bassPulse, bassPulse);
+        D3DXMatrixTranslation(&mTrans, -offset, 0.0f, 0.0f);
+
+        D3DXMatrixMultiply(&mTmp, &mRotZ, &mRotY);
+        D3DXMatrixMultiply(&mTmp, &mScale, &mTmp);
+        D3DXMatrixMultiply(&mWorld, &mTmp, &mTrans);
 
         g_pDevice->SetTransform(D3DTS_WORLD, &mWorld);
 
         g_pDevice->DrawIndexedPrimitive(
-            D3DPT_TRIANGLELIST,
-            0, s_numVerts,
-            0, s_numIndices / 3);
+            D3DPT_TRIANGLELIST, 0, s_numVerts, 0, s_numIndices / 3);
+
+        g_pDevice->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);
     }
 
-    // *** Ring 2 - TRANSPARENT + faster RGB cycling (center) ***
+    // *** Ring 2 — TRANSPARENT RGB cycling, additive blend (center) ***
     {
         DWORD rgb = MakeRgbCycle(s_tick * 2);
 
+        g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
         g_pDevice->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);
         g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
         g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
         g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
         g_pDevice->SetTexture(0, NULL);
 
-        // Use texture factor as the color source
         g_pDevice->SetRenderState(D3DRS_TEXTUREFACTOR, rgb);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
         g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TFACTOR);
+        g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TFACTOR);
 
-        float scale = 1.1f;
-        D3DXMATRIX mScale, mRot, mWorld;
-        D3DXMatrixScaling(&mScale, scale, scale, scale);
-        D3DXMatrixRotationX(&mRot, t * 0.8f);
-        D3DXMatrixMultiply(&mWorld, &mScale, &mRot);
+        // Compound rotation: X spin + slow Y precession
+        float sc = 1.1f * bassPulse;
+        D3DXMATRIX mScale, mRotX, mRotY, mTmp, mWorld;
+        D3DXMatrixScaling(&mScale, sc, sc, sc);
+        D3DXMatrixRotationX(&mRotX, t * 0.8f);
+        D3DXMatrixRotationY(&mRotY, t * 0.25f);
+
+        D3DXMatrixMultiply(&mTmp, &mRotX, &mRotY);
+        D3DXMatrixMultiply(&mWorld, &mScale, &mTmp);
 
         g_pDevice->SetTransform(D3DTS_WORLD, &mWorld);
 
         g_pDevice->DrawIndexedPrimitive(
-            D3DPT_TRIANGLELIST,
-            0, s_numVerts,
-            0, s_numIndices / 3);
+            D3DPT_TRIANGLELIST, 0, s_numVerts, 0, s_numIndices / 3);
     }
 
-    // Restore stage for textured ring
-    g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
-    g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-
-    // *** Ring 3 - TEXTURED GLOW (right, metal.dds) ***
+    // *** Ring 3 — TEXTURED METAL with lighting + specular (right) ***
     {
+        // Metal material: neutral diffuse, strong specular for highlight
+        D3DMATERIAL8 mat;
+        ZeroMemory(&mat, sizeof(mat));
+        mat.Diffuse.r = 0.75f; mat.Diffuse.g = 0.75f; mat.Diffuse.b = 0.80f;
+        mat.Diffuse.a = 1.0f;
+        mat.Specular.r = 1.0f;  mat.Specular.g = 0.95f; mat.Specular.b = 0.85f;
+        mat.Power = 64.0f;   // tight highlight
+        g_pDevice->SetMaterial(&mat);
+
+        g_pDevice->SetRenderState(D3DRS_LIGHTING, TRUE);
         g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
         g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
         g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
         g_pDevice->SetTexture(0, s_tex);
 
-        D3DXMATRIX mRotY, mRotZ, mTrans, mWorldTmp, mWorld;
+        // Texture modulates diffuse lighting result
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_CURRENT);
+        g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+
+        float sc = bassPulse;
+        D3DXMATRIX mScale, mRotY, mRotZ, mTrans, mTmp, mWorld;
+        D3DXMatrixScaling(&mScale, sc, sc, sc);
         D3DXMatrixRotationY(&mRotY, t * 0.5f);
         D3DXMatrixRotationZ(&mRotZ, t * 1.1f);
-        D3DXMatrixTranslation(&mTrans, RING_OFFSET, 0.0f, 0.0f);
+        D3DXMatrixTranslation(&mTrans, offset, 0.0f, 0.0f);
 
-        D3DXMatrixMultiply(&mWorldTmp, &mRotY, &mRotZ);
-        D3DXMatrixMultiply(&mWorld, &mWorldTmp, &mTrans);
+        D3DXMatrixMultiply(&mTmp, &mRotY, &mRotZ);
+        D3DXMatrixMultiply(&mTmp, &mScale, &mTmp);
+        D3DXMatrixMultiply(&mWorld, &mTmp, &mTrans);
 
         g_pDevice->SetTransform(D3DTS_WORLD, &mWorld);
 
         g_pDevice->DrawIndexedPrimitive(
-            D3DPT_TRIANGLELIST,
-            0, s_numVerts,
-            0, s_numIndices / 3);
+            D3DPT_TRIANGLELIST, 0, s_numVerts, 0, s_numIndices / 3);
     }
+
+    // -------------------------------------------------------------------------
+    // Cleanup lighting so it doesn't bleed into other scenes
+    // -------------------------------------------------------------------------
+    g_pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
+    g_pDevice->SetRenderState(D3DRS_SPECULARENABLE, FALSE);
+    g_pDevice->LightEnable(0, FALSE);
+    g_pDevice->LightEnable(1, FALSE);
+
+    // Restore texture stage to simple diffuse
+    g_pDevice->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    g_pDevice->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+    g_pDevice->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
 
     // -------------------------------------------------------------------------
     // Fade overlay
     // -------------------------------------------------------------------------
-
     if (fade < 1.0f)
     {
-        DWORD a = (DWORD)(255 * (1.0f - fade));
-        DWORD col = (a << 24);
+        int a = Ftoi(255.f * (1.0f - fade));
+        DWORD col = ((DWORD)a << 24);
 
         struct QuadV { float x, y, z, rhw; DWORD c; };
         QuadV q[4] =
         {
-            { 0,   0,   0,1, col },
-            {640,  0,   0,1, col },
-            { 0, 480,   0,1, col },
-            {640,480,   0,1, col }
+            {   0,   0, 0, 1, col },
+            { 640,   0, 0, 1, col },
+            {   0, 480, 0, 1, col },
+            { 640, 480, 0, 1, col }
         };
 
         g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
@@ -501,8 +608,6 @@ void RingScene_Render(float demoTime)
         g_pDevice->SetTexture(0, NULL);
         g_pDevice->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
 
-        g_pDevice->DrawPrimitiveUP(
-            D3DPT_TRIANGLESTRIP,
-            2, q, sizeof(QuadV));
+        g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof(QuadV));
     }
 }

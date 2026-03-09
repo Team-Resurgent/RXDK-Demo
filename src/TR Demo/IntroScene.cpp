@@ -197,7 +197,8 @@ static int                s_frameCount = 0;
 
 enum IntroPhase
 {
-    PHASE_PRESENTED = 0,
+    PHASE_RAM_SPLASH = 0,   // 128MB easter egg (skipped on 64MB)
+    PHASE_PRESENTED,
     PHASE_LOGO_TR,
     PHASE_MUSIC_BY,
     PHASE_SUPPORT_XBS,
@@ -205,6 +206,7 @@ enum IntroPhase
 };
 static IntroPhase s_phase = PHASE_PRESENTED;
 static int        s_phaseFrame = 0;
+static bool       s_has128MB = false;  // set in Init, drives RAM splash
 
 // Typewriter state
 static int  s_twChars = 0;   // characters revealed so far
@@ -802,11 +804,20 @@ void IntroScene_Init()
 {
     s_introActive = true;
     s_frameCount = 0;
-    s_phase = PHASE_PRESENTED;
     s_phaseFrame = 0;
     s_twChars = 0;
     s_twLine2 = 0;
     s_cursorBlink = true;
+
+    // Detect installed RAM — Xbox reports physical memory via GlobalMemoryStatus.
+    // 64MB stock = ~67108864 bytes, 128MB upgraded = ~134217728 bytes.
+    MEMORYSTATUS ms;
+    ms.dwLength = sizeof(ms);
+    GlobalMemoryStatus(&ms);
+    s_has128MB = (ms.dwTotalPhys >= 100 * 1024 * 1024);  // >100MB = 128MB kit
+
+    // Start with RAM splash only if 128MB detected, else skip straight to PRESENTED
+    s_phase = s_has128MB ? PHASE_RAM_SPLASH : PHASE_PRESENTED;
 
     s_logoTex = LoadTextureFromDDS("D:\\tex\\tr.dds", s_logoW, s_logoH);
     s_xbsTex = LoadTextureFromDDS("D:\\tex\\xbs.dds", s_xbsW, s_xbsH);
@@ -861,6 +872,70 @@ void IntroScene_Render(float /*demoTime*/)
     switch (s_phase)
     {
         // -------------------------------------------------------------------------
+    case PHASE_RAM_SPLASH:
+    {
+        // ~5 seconds at 30fps = 150 frames
+        const int RAM_TOTAL = 150;
+        const int RAM_FADEIN = 18;
+        const int RAM_FADEOUT = 18;
+
+        if (s_phaseFrame >= RAM_TOTAL)
+        {
+            s_phase = PHASE_PRESENTED;
+            s_phaseFrame = 0;
+            s_twChars = 0;
+            s_twLine2 = 0;
+            break;
+        }
+
+        // Alpha envelope
+        int alpha = 255;
+        if (s_phaseFrame < RAM_FADEIN)
+            alpha = (s_phaseFrame * 255) / RAM_FADEIN;
+        else if (s_phaseFrame > (RAM_TOTAL - RAM_FADEOUT))
+            alpha = ((RAM_TOTAL - s_phaseFrame) * 255) / RAM_FADEOUT;
+
+        BYTE a = (BYTE)alpha;
+
+        // Line 1: bold status line
+        const char* ramL1 = "[ 128MB RAM DETECTED ]";
+        // Line 2: witty comment — cycles through a few to avoid a single stale joke
+        // Use phaseFrame to pick one after the fade-in settles
+        const char* ramLines[] =
+        {
+            "Overkill? Never.",
+            "Your Xbox goes to 11.",
+            "The devs didn't plan for this.",
+            "Extra RAM, extra swagger.",
+        };
+        const int   RAM_LINE_COUNT = 4;
+        int         lineIdx = (s_phaseFrame / 40) % RAM_LINE_COUNT;
+        const char* ramL2 = ramLines[lineIdx];
+
+        // Draw centred, stacked, green-on-black terminal aesthetic
+        float cx = SCREEN_W * 0.5f;
+        float cy = SCREEN_H * 0.5f;
+
+        float scL1 = 2.2f;
+        float scL2 = 1.4f;
+
+        float wL1 = (float)strlen(ramL1) * 6.0f * scL1;
+        float wL2 = (float)strlen(ramL2) * 6.0f * scL2;
+
+        // Subtle green scanline flicker on L1 using frameCount
+        int flick = (s_frameCount & 3);  // 0-3 cycle
+        BYTE gr = (flick == 0) ? 210 : 255;
+
+        DrawText(cx - wL1 * 0.5f, cy - 24.0f, ramL1, scL1,
+            D3DCOLOR_ARGB(a, 0, gr, 80));
+
+        DrawText(cx - wL2 * 0.5f, cy + 18.0f, ramL2, scL2,
+            D3DCOLOR_ARGB((a >> 1), 0, 200, 120));
+
+        break;
+    }
+
+    // -------------------------------------------------------------------------
     case PHASE_PRESENTED:
     {
         const char* L1 = "Presented By:";

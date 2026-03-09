@@ -329,12 +329,27 @@ static void DrawSky(DWORD tMs)
 {
     if (!g_pDevice) return;
 
-    // Clean gradient - no banding
+    // Bottom colour breathes slowly between magenta-purple and blue-purple
+    // using the pre-built LUT — no extra trig, no float->int cast
+    int idxB = (int)((tMs / 60u) & 1023u);   // ~61s full cycle
+    // s_sin gives -1..1; scale to 0..256 using integer shift from LUT index
+    // LUT index 0..1023 maps to sin 0..2pi, first half 0..511 is positive
+    // Simpler: use triangle wave on index for 0..256 range, no float cast
+    int breathI = (int)TriWave511(idxB) >> 1;  // TriWave511 gives 0..511, >>1 = 0..255
+    if (breathI < 0) breathI = 0;
+    if (breathI > 256) breathI = 256;
+
+    // Interpolate bottom: magenta-purple (95,8,70) <-> blue-purple (30,10,90)
+    // All integer lerp: result = a + (b-a)*t/256
+    BYTE bR = (BYTE)(95 + (((30 - 95) * breathI) >> 8));
+    BYTE bG = (BYTE)(8 + (((10 - 8) * breathI) >> 8));
+    BYTE bB = (BYTE)(70 + (((90 - 70) * breathI) >> 8));
+
     Vtx2D q[4];
-    q[0] = { 0.0f,     0.0f,      0.0f, 1.0f, ARGB(255,  12,  8,  50) };
-    q[1] = { SCREEN_W, 0.0f,      0.0f, 1.0f, ARGB(255,  12,  8,  50) };
-    q[2] = { 0.0f,     SCREEN_H,  0.0f, 1.0f, ARGB(255,  95,  8,  70) };
-    q[3] = { SCREEN_W, SCREEN_H,  0.0f, 1.0f, ARGB(255,  95,  8,  70) };
+    q[0] = { 0.0f,     0.0f,     0.0f, 1.0f, ARGB(255,  12,  8,  50) };
+    q[1] = { SCREEN_W, 0.0f,     0.0f, 1.0f, ARGB(255,  12,  8,  50) };
+    q[2] = { 0.0f,     SCREEN_H, 0.0f, 1.0f, ARGB(255, bR,  bG,  bB) };
+    q[3] = { SCREEN_W, SCREEN_H, 0.0f, 1.0f, ARGB(255, bR,  bG,  bB) };
 
     g_pDevice->SetVertexShader(FVF_2D);
     g_pDevice->SetTexture(0, NULL);
@@ -936,6 +951,93 @@ static void DrawGridAndWater(DWORD tMs, float sweep)
 }
 
 // ------------------------------------------------------------
+// Horizon glow line
+// ------------------------------------------------------------
+
+static void DrawHorizonGlow(DWORD tMs)
+{
+    if (!g_pDevice) return;
+
+    // Slow pulse on glow width using LUT
+    int idxP = (int)((tMs / 22u) & 1023u);
+    float pulse = 0.75f + 0.25f * s_sin[idxP];  // 0.75..1.0
+
+    // Hot core line: thin bright magenta-white right at horizon
+    Begin2D(true);
+    {
+        // Core: near-white magenta, 1.5px tall
+        Vtx2D core[4];
+        core[0] = { 0.0f,     HORIZON_Y - 0.8f, 0, 1, ARGB(220, 255, 180, 255) };
+        core[1] = { SCREEN_W, HORIZON_Y - 0.8f, 0, 1, ARGB(220, 255, 180, 255) };
+        core[2] = { 0.0f,     HORIZON_Y + 0.8f, 0, 1, ARGB(180, 255, 100, 230) };
+        core[3] = { SCREEN_W, HORIZON_Y + 0.8f, 0, 1, ARGB(180, 255, 100, 230) };
+        g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, core, sizeof(Vtx2D));
+
+        // Glow above: magenta bleeding upward ~18px
+        float glowH = 18.0f * pulse;
+        Vtx2D glowUp[4];
+        glowUp[0] = { 0.0f,     HORIZON_Y - glowH, 0, 1, ARGB(0,   255, 40, 200) };
+        glowUp[1] = { SCREEN_W, HORIZON_Y - glowH, 0, 1, ARGB(0,   255, 40, 200) };
+        glowUp[2] = { 0.0f,     HORIZON_Y,         0, 1, ARGB(85,  255, 40, 200) };
+        glowUp[3] = { SCREEN_W, HORIZON_Y,         0, 1, ARGB(85,  255, 40, 200) };
+        g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, glowUp, sizeof(Vtx2D));
+
+        // Glow below: cyan bleeding into water ~22px
+        float glowD = 22.0f * pulse;
+        Vtx2D glowDn[4];
+        glowDn[0] = { 0.0f,     HORIZON_Y,         0, 1, ARGB(70,  60, 220, 255) };
+        glowDn[1] = { SCREEN_W, HORIZON_Y,         0, 1, ARGB(70,  60, 220, 255) };
+        glowDn[2] = { 0.0f,     HORIZON_Y + glowD, 0, 1, ARGB(0,   60, 220, 255) };
+        glowDn[3] = { SCREEN_W, HORIZON_Y + glowD, 0, 1, ARGB(0,   60, 220, 255) };
+        g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, glowDn, sizeof(Vtx2D));
+    }
+    End2D();
+}
+
+// ------------------------------------------------------------
+// Water shimmer
+// ------------------------------------------------------------
+
+static void DrawWaterShimmer(DWORD tMs)
+{
+    if (!g_pDevice) return;
+
+    // 5 shimmer lines at different Y depths and drift speeds
+    // All using LUT so no per-frame trig
+    struct ShimmerLine { float yBase; float speed; float drift; BYTE alpha; };
+    static const ShimmerLine lines[5] =
+    {
+        { HORIZON_Y + 28.f,  18u, 12.0f, 55 },
+        { HORIZON_Y + 55.f,  27u,  8.0f, 45 },
+        { HORIZON_Y + 88.f,  35u, 14.0f, 35 },
+        { HORIZON_Y + 120.f, 44u,  6.0f, 25 },
+        { HORIZON_Y + 150.f, 52u, 10.0f, 15 },
+    };
+
+    Begin2D(true);
+
+    for (int i = 0; i < 5; ++i)
+    {
+        const ShimmerLine& sl = lines[i];
+
+        int idxS = (int)((tMs / (unsigned)sl.speed) & 1023u);
+        float drift = s_sin[idxS] * sl.drift;
+
+        float y = sl.yBase + drift;
+
+        // Shimmer line: bright cyan-magenta, fades to transparent at edges
+        Vtx2D seg[4];
+        seg[0] = { 0.0f,          y - 0.5f, 0, 1, ARGB(0,          180, 80, 220) };
+        seg[1] = { SCREEN_W,      y - 0.5f, 0, 1, ARGB(0,          180, 80, 220) };
+        seg[2] = { 0.0f,          y + 0.5f, 0, 1, ARGB(sl.alpha,   200, 100, 255) };
+        seg[3] = { SCREEN_W,      y + 0.5f, 0, 1, ARGB(sl.alpha,   200, 100, 255) };
+        g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, seg, sizeof(Vtx2D));
+    }
+
+    End2D();
+}
+
+// ------------------------------------------------------------
 // Public API
 // ------------------------------------------------------------
 
@@ -1005,4 +1107,10 @@ void CityScene_Render(float)
 
     // 5) Grid + water fade (center VP)
     DrawGridAndWater(tMs, sweep);
+
+    // 6) Horizon glow line — drawn after grid so it sits on top
+    DrawHorizonGlow(tMs);
+
+    // 7) Water shimmer — drifting lines on the reflection surface
+    DrawWaterShimmer(tMs);
 }

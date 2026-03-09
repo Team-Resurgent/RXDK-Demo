@@ -3,12 +3,24 @@
 // This version precomputes deformed vertices to avoid strip seams.
 
 #include "PlasmaScene.h"
+#include "music.h"
 
 #include <xtl.h>
 #include <math.h>
 
 // Device provided by main.cpp (same as IntroScene)
 extern LPDIRECT3DDEVICE8 g_pDevice;
+
+// Avoid __ftol2_sse linker error on Xbox
+static __declspec(noinline) int Ftoi(float f)
+{
+    int i;
+    __asm {
+        fld   f
+        fistp i
+    }
+    return i;
+}
 
 // Match your main resolution
 static const float SCREEN_W = 640.0f;
@@ -77,6 +89,34 @@ static const DWORD s_paletteGreen[5] =
     D3DCOLOR_XRGB(255,255,255)
 };
 
+static const DWORD s_paletteFire[5] =
+{
+    D3DCOLOR_XRGB(10,   0,   0),
+    D3DCOLOR_XRGB(100,  10,  0),
+    D3DCOLOR_XRGB(220,  60,  0),
+    D3DCOLOR_XRGB(255, 180, 20),
+    D3DCOLOR_XRGB(255, 255,180)
+};
+
+// All palettes in one table for easy cross-fade indexing
+static const DWORD* s_palettes[4] =
+{
+    s_paletteBlue,
+    s_paletteMagenta,
+    s_paletteGreen,
+    s_paletteFire
+};
+static const int PALETTE_COUNT = 4;
+
+// Cross-fade state
+static int   s_palFrom = 0;     // current palette index
+static int   s_palTo = 1;     // target palette index
+static float s_palBlend = 0.0f;  // 0.0 = palFrom, 1.0 = palTo
+static int   s_palHoldFrames = 0;     // frames spent on current palette
+
+static const int   PAL_HOLD = 150;  // frames to hold before fading
+static const float PAL_FADESPD = 0.012f; // blend advance per frame (~83 frames)
+
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
@@ -104,17 +144,37 @@ static void InitGridPositions()
     }
 }
 
-// Update colors based on time & position.
-static void UpdatePlasmaColors(float t, int palettePhase)
+// Update colors based on time, cross-faded palette, and VU level.
+static void UpdatePlasmaColors(float t, float palBlend, int palFrom, int palTo, int vuOverall)
 {
-    const DWORD* pal;
-    switch (palettePhase)
+    // Build blended palette from palFrom -> palTo
+    DWORD blendedPal[5];
+    const DWORD* pA = s_palettes[palFrom];
+    const DWORD* pB = s_palettes[palTo];
+    int blendI = Ftoi(palBlend * 256.f);
+    if (blendI > 256) blendI = 256;
+
+    // VU brightness boost: vuOverall 0-255 drives up to +40 brightness
+    int vuBoost = (vuOverall * 40) >> 8;
+
+    for (int p = 0; p < 5; ++p)
     {
-    default:
-    case 0: pal = s_paletteBlue;    break;
-    case 1: pal = s_paletteMagenta; break;
-    case 2: pal = s_paletteGreen;   break;
+        int r0 = (pA[p] >> 16) & 0xFF, r1 = (pB[p] >> 16) & 0xFF;
+        int g0 = (pA[p] >> 8) & 0xFF, g1 = (pB[p] >> 8) & 0xFF;
+        int b0 = pA[p] & 0xFF, b1 = pB[p] & 0xFF;
+
+        int r = r0 + (((r1 - r0) * blendI) >> 8) + vuBoost;
+        int g = g0 + (((g1 - g0) * blendI) >> 8) + vuBoost;
+        int b = b0 + (((b1 - b0) * blendI) >> 8) + vuBoost;
+
+        if (r > 255) r = 255;
+        if (g > 255) g = 255;
+        if (b > 255) b = 255;
+
+        blendedPal[p] = 0xFF000000 | (r << 16) | (g << 8) | b;
     }
+
+    const DWORD* pal = blendedPal;
 
     const float sx = 4.0f / (float)(GRID_X - 1);
     const float sy = 4.0f / (float)(GRID_Y - 1);
@@ -218,6 +278,10 @@ void PlasmaScene_Init()
 
     s_plasmaActive = true;
     s_frameCount = 0;
+    s_palFrom = 0;
+    s_palTo = 1;
+    s_palBlend = 0.0f;
+    s_palHoldFrames = 0;
 
     InitGridPositions();
 }
@@ -238,11 +302,41 @@ void PlasmaScene_Render(float demoTime)
     s_frameCount++;
 
     float t = (float)s_frameCount * 0.06f;
-    int palettePhase = (s_frameCount / 120) % 3;
 
-    UpdatePlasmaColors(t, palettePhase);
+    // -------------------------------------------------------------------------
+    // Palette cross-fade state machine
+    // -------------------------------------------------------------------------
+    s_palHoldFrames++;
+    if (s_palHoldFrames >= PAL_HOLD)
+    {
+        // Advance blend toward next palette
+        s_palBlend += PAL_FADESPD;
+        if (s_palBlend >= 1.0f)
+        {
+            // Snap to target, pick next target
+            s_palBlend = 0.0f;
+            s_palFrom = s_palTo;
+            s_palTo = (s_palTo + 1) % PALETTE_COUNT;
+            s_palHoldFrames = 0;
+        }
+    }
 
+    // -------------------------------------------------------------------------
+    // VU levels for music-driven brightness
+    // -------------------------------------------------------------------------
+    int vu[4] = { 0, 0, 0, 0 };
+    if (Music_IsPlaying())
+        Music_GetVULevels(vu);
+    int vuOverall = vu[3];   // overall level drives brightness pulse
+
+    // -------------------------------------------------------------------------
+    // Update plasma colours
+    // -------------------------------------------------------------------------
+    UpdatePlasmaColors(t, s_palBlend, s_palFrom, s_palTo, vuOverall);
+
+    // -------------------------------------------------------------------------
     // Camera motion
+    // -------------------------------------------------------------------------
     float zoom = 1.0f + 0.06f * sinf(t * 0.25f);
     float angle = 0.06f * sinf(t * 0.18f);
     float ca = cosf(angle);
@@ -252,7 +346,7 @@ void PlasmaScene_Render(float demoTime)
     const float cy = SCREEN_H * 0.5f;
 
     // -------------------------------------------------------------------------
-    // 1) Compute deformed vertices ONCE into s_deformed
+    // Compute deformed vertices
     // -------------------------------------------------------------------------
     for (int j = 0; j < GRID_Y; ++j)
     {
@@ -274,15 +368,14 @@ void PlasmaScene_Render(float demoTime)
             v.y += wobbleY;
             v.x += wobbleX;
 
-            // Camera transform
-            float tx = v.x - cx;
-            float ty = v.y - cy;
+            float tx2 = v.x - cx;
+            float ty2 = v.y - cy;
 
-            tx *= zoom;
-            ty *= zoom;
+            tx2 *= zoom;
+            ty2 *= zoom;
 
-            float rx = tx * ca - ty * sa;
-            float ry = tx * sa + ty * ca;
+            float rx = tx2 * ca - ty2 * sa;
+            float ry = tx2 * sa + ty2 * ca;
 
             v.x = rx + cx;
             v.y = ry + cy;
@@ -292,7 +385,7 @@ void PlasmaScene_Render(float demoTime)
     }
 
     // -------------------------------------------------------------------------
-    // 2) Render using triangle strips built from s_deformed
+    // Render plasma strips
     // -------------------------------------------------------------------------
     g_pDevice->SetVertexShader(PLASMA_FVF);
     g_pDevice->SetTexture(0, NULL);
@@ -306,7 +399,6 @@ void PlasmaScene_Render(float demoTime)
     for (int j = 0; j < GRID_Y - 1; ++j)
     {
         int idx = 0;
-
         for (int i = 0; i < GRID_X; ++i)
         {
             s_strip[idx++] = s_deformed[j][i];
@@ -317,7 +409,64 @@ void PlasmaScene_Render(float demoTime)
             D3DPT_TRIANGLESTRIP,
             (GRID_X * 2) - 2,
             s_strip,
-            sizeof(PlasmaVertex)
-        );
+            sizeof(PlasmaVertex));
     }
+
+    // -------------------------------------------------------------------------
+    // Scanline overlay -- every other row darkened, CRT feel
+    // Each scanline is a 1px-tall semi-transparent black quad.
+    // We batch pairs: one bright row (skip), one dark row (draw).
+    // -------------------------------------------------------------------------
+    // VU low frequency slightly pulses scanline darkness for a breathing effect
+    int scanAlpha = 55 + ((vu[0] * 20) >> 8);  // 55-75 range
+
+    struct SV { float x, y, z, rhw; DWORD c; };
+
+    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    g_pDevice->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    g_pDevice->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+
+    DWORD scanCol = D3DCOLOR_ARGB(scanAlpha, 0, 0, 0);
+
+    // Draw every other horizontal line as a dark stripe
+    for (int sy = 1; sy < (int)SCREEN_H; sy += 2)
+    {
+        float fy = (float)sy;
+        SV line[4] =
+        {
+            { -0.5f,          fy - 0.5f, 0.f, 1.f, scanCol },
+            { SCREEN_W - 0.5f, fy - 0.5f, 0.f, 1.f, scanCol },
+            { -0.5f,          fy + 0.5f, 0.f, 1.f, scanCol },
+            { SCREEN_W - 0.5f, fy + 0.5f, 0.f, 1.f, scanCol },
+        };
+        g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, line, sizeof(SV));
+    }
+
+    // -------------------------------------------------------------------------
+    // Vignette -- dark corners, transparent center
+    // -------------------------------------------------------------------------
+    DWORD vigEdge = D3DCOLOR_ARGB(180, 0, 0, 0);
+    DWORD vigCenter = D3DCOLOR_ARGB(0, 0, 0, 0);
+
+    SV vig[4] =
+    {
+        { -0.5f,           -0.5f,          0.f, 1.f, vigEdge   },
+        { SCREEN_W - 0.5f, -0.5f,          0.f, 1.f, vigEdge   },
+        { -0.5f,           SCREEN_H - 0.5f, 0.f, 1.f, vigEdge  },
+        { SCREEN_W - 0.5f, SCREEN_H - 0.5f, 0.f, 1.f, vigEdge  },
+    };
+    // Centre vertex blend achieved by drawing four corner triangles
+    // Simpler: draw a radial using center vertex in a triangle fan
+    SV vigFan[6] =
+    {
+        { SCREEN_W * 0.5f - 0.5f, SCREEN_H * 0.5f - 0.5f, 0.f, 1.f, vigCenter },
+        { -0.5f,                  -0.5f,                   0.f, 1.f, vigEdge   },
+        { SCREEN_W - 0.5f,        -0.5f,                   0.f, 1.f, vigEdge   },
+        { SCREEN_W - 0.5f,        SCREEN_H - 0.5f,         0.f, 1.f, vigEdge   },
+        { -0.5f,                  SCREEN_H - 0.5f,         0.f, 1.f, vigEdge   },
+        { -0.5f,                  -0.5f,                   0.f, 1.f, vigEdge   },
+    };
+    g_pDevice->DrawPrimitiveUP(D3DPT_TRIANGLEFAN, 4, vigFan, sizeof(SV));
+
+    g_pDevice->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
 }

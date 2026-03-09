@@ -349,7 +349,7 @@ static int       s_subScroll = 0;      // top-of-list scroll offset
 static int       s_sceneCount = 0;
 
 // Scene enable bitmask (max 16 scenes — WORD covers SCENE_COUNT ≤ 16)
-static WORD      s_sceneEnabled = 0xFFFF; // all enabled by default
+static int       s_sceneEnabled = 0x1FFFF; // all 17 scenes enabled by default
 
 // Jump request output
 static int       s_jumpTarget = -1;     // -1 = no pending jump
@@ -389,7 +389,7 @@ static const char* s_sceneNames[] =
     "Credits",
     "City",
 };
-static const int SCENE_NAMES_MAX = 15;
+static const int SCENE_NAMES_MAX = 17;
 
 // Main menu item labels
 static const char* s_mainLabels[MAIN_ITEMS] =
@@ -559,7 +559,7 @@ static void SetState(MenuState ns)
 void Menu_Init(int sceneCount)
 {
     s_sceneCount = (sceneCount > SCENE_NAMES_MAX) ? SCENE_NAMES_MAX : sceneCount;
-    s_sceneEnabled = (WORD)((1u << s_sceneCount) - 1u);  // all enabled
+    s_sceneEnabled = (int)((1u << s_sceneCount) - 1u);  // all enabled
     s_state = MS_CLOSED;
     s_panelAlpha = 0.0f;
     s_slideY = 20.0f;
@@ -790,7 +790,7 @@ bool Menu_Update(DWORD nowTicks, WORD pressed)
         if (pressed & BTN_A)
         {
             // Toggle enable bit for this scene
-            WORD bit = (WORD)(1u << s_subCursor);
+            int bit = (1u << s_subCursor);
             s_sceneEnabled ^= bit;
 
             // Don't allow ALL scenes to be disabled
@@ -1079,7 +1079,7 @@ int Menu_GetRequestedScene()
 bool Menu_IsSceneEnabled(int sceneId)
 {
     if (sceneId < 0 || sceneId >= 16) return true;
-    return (s_sceneEnabled & (WORD)(1u << sceneId)) != 0;
+    return (s_sceneEnabled & (int)(1u << sceneId)) != 0;
 }
 
 bool Menu_IsMusicMuted()

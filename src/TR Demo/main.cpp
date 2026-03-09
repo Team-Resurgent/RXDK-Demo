@@ -86,7 +86,7 @@ struct DemoState
 static DemoState g_demo = {};
 
 // durations in milliseconds
-static const DWORD INTRO_SCENE_MS = 15000;
+static const DWORD INTRO_SCENE_MS = 20000;
 static const DWORD PLASMA_SCENE_MS = 10000;
 static const DWORD BALL_SCENE_MS = 10000;
 static const DWORD CHROME_SCENE_MS = 12000;
