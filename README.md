@@ -18,9 +18,9 @@ the RXDK environment.
  ## RXDK Demos
 
 - IntroScene - Opening title/logo sequence (new)
-- ChromeScene - A DXT1/DXT5 bump mapping sample with diffuse lighting and UV ripple
+- ChromeScene - DOT3 bump-mapped sphere with per-frame normal animation and cubemap reflection
 - PlasmaScene - Fullscreen animated plasma effect with swirling color patterns and camera drift
-- BallScene - Physics demo with bouncing balls featuring squash/stretch deformation and multiple materials (rubber, chrome, glass, plasma) [New Look]
+- BallScene - Physics demo with bouncing balls on a perspective grid floor, featuring squash/stretch deformation and multiple materials (rubber, chrome, glass, plasma) [New Look]
 - RingScene - Animated ring/torus geometry effects
 - GlassScene - Stained glass-inspired scene showing off CPU-based vertex shading and DOT3 PS shading.
 - GalaxyScene - Procedural space scene with stars, nebulae, and dust particles with stats overlay
@@ -28,7 +28,7 @@ the RXDK environment.
 - VURXDKScene - Large wireframe "RXDK" letters with music-reactive VU meter fills
 - XScene - Xbox logo visualization
 - CubeScene - Spinning cube with Matrix-style "RXDK" text rain on all 6 faces
-- CuveEnvScene - A spinning cube with environment  mapping and  with an Xbox-themed space background
+- CubeEnvScene - A spinning cube with environment mapping and an Xbox-themed space background
 - DripScene - Interactive water ripple simulation with multi-layer shading, rain mode, and realistic physics
 - MazeScene - A cel-shaded Windows 95-like maze
 - PostFXScene - A CRT signal corruption sequence: stable BIOS display progressively consumed by scanline interference, sync tears, chromatic aberration, barrel warp, and phosphor burn, collapsing to a dying horizontal line.
@@ -38,7 +38,6 @@ the RXDK environment.
 ## Constraints / Design Notes
 
 - No per-frame heap allocation
-- No RNG usage in render paths
 - Z-buffer disabled for predictable visuals
 - Built to run cleanly on real hardware and emulators
 
