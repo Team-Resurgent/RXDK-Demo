@@ -90,6 +90,9 @@
     <ClCompile Include="CrystalScene.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="BiosScreen.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Text Include="Media\Copy Assets Here.txt">
@@ -160,20 +163,11 @@
     <ClInclude Include="CrystalScene.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="BiosScreen.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="Media\galaxy\cloud_256.dds">
-      <Filter>Media\tex</Filter>
-    </Image>
-    <Image Include="Media\metal.dds">
-      <Filter>Media\tex</Filter>
-    </Image>
-    <Image Include="Media\tr.dds">
-      <Filter>Media\tex</Filter>
-    </Image>
-    <Image Include="Media\xbs.dds">
-      <Filter>Media\tex</Filter>
-    </Image>
     <Image Include="Media\tex\chrome.dds">
       <Filter>Media\tex</Filter>
     </Image>
@@ -211,6 +205,13 @@
       <Filter>Media\tex</Filter>
     </Image>
     <Image Include="Media\tex\rock.dds">
+      <Filter>Media\tex</Filter>
+    </Image>
+    <Image Include="Media\tex\cloud_256.dds" />
+    <Image Include="Media\tex\metal.dds" />
+    <Image Include="Media\tex\tr.dds" />
+    <Image Include="Media\tex\xbs.dds" />
+    <Image Include="Media\tex\xb.dds">
       <Filter>Media\tex</Filter>
     </Image>
   </ItemGroup>

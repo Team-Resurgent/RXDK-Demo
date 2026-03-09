@@ -12,6 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="BallScene.cpp" />
+    <ClCompile Include="BiosScreen.cpp" />
     <ClCompile Include="ChromeScene.cpp" />
     <ClCompile Include="CityScene.cpp" />
     <ClCompile Include="Credits.cpp" />
@@ -39,6 +40,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="BallScene.h" />
+    <ClInclude Include="BiosScreen.h" />
     <ClInclude Include="ChromeScene.h" />
     <ClInclude Include="CityScene.h" />
     <ClInclude Include="Credits.h" />
@@ -80,6 +82,7 @@
     <Image Include="Media\tex\metal.dds" />
     <Image Include="Media\tex\rock.dds" />
     <Image Include="Media\tex\tr.dds" />
+    <Image Include="Media\tex\xb.dds" />
     <Image Include="Media\tex\xbs.dds" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

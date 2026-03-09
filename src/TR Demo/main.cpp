@@ -13,6 +13,7 @@
 #include "input.h"
 #include "music.h"
 #include "Menu.h"
+#include "BiosScreen.h"
 
 #include "IntroScene.h"
 #include "PlasmaScene.h"
@@ -57,7 +58,7 @@ enum DemoSceneId
     SCENE_RING,
     SCENE_GLASS,
     SCENE_GALAXY,
-	SCENE_CRYSTAL,
+    SCENE_CRYSTAL,
     SCENE_VURXDK,
     SCENE_X,
     SCENE_CUBE,
@@ -211,7 +212,7 @@ static void InitScene(DemoSceneId id)
     case SCENE_RING:     RingScene_Init();     break;
     case SCENE_GLASS:    GlassScene_Init();    break;
     case SCENE_GALAXY:   GalaxyScene_Init();   break;
-	case SCENE_CRYSTAL:  CrystalScene_Init();  break;
+    case SCENE_CRYSTAL:  CrystalScene_Init();  break;
     case SCENE_VURXDK:   VURXDKScene_Init();   break;
     case SCENE_X:        XScene_Init();        break;
     case SCENE_CUBE:     CubeScene_Init();     break;
@@ -236,7 +237,7 @@ static void ShutdownScene(DemoSceneId id)
     case SCENE_RING:     RingScene_Shutdown();     break;
     case SCENE_GLASS:    GlassScene_Shutdown();    break;
     case SCENE_GALAXY:   GalaxyScene_Shutdown();   break;
-	case SCENE_CRYSTAL:  CrystalScene_Shutdown();  break;
+    case SCENE_CRYSTAL:  CrystalScene_Shutdown();  break;
     case SCENE_VURXDK:   VURXDKScene_Shutdown();   break;
     case SCENE_X:        XScene_Shutdown();        break;
     case SCENE_CUBE:     CubeScene_Shutdown();     break;
@@ -261,7 +262,7 @@ static void RenderScene(DemoSceneId id, float demoTime)
     case SCENE_RING:     RingScene_Render(demoTime);     break;
     case SCENE_GLASS:    GlassScene_Render(demoTime);    break;
     case SCENE_GALAXY:   GalaxyScene_Render(demoTime);   break;
-	case SCENE_CRYSTAL:  CrystalScene_Render(demoTime);  break;
+    case SCENE_CRYSTAL:  CrystalScene_Render(demoTime);  break;
     case SCENE_VURXDK:   VURXDKScene_Render(demoTime);   break;
     case SCENE_X:        XScene_Render(demoTime);        break;
     case SCENE_CUBE:     CubeScene_Render(demoTime);     break;
@@ -366,7 +367,7 @@ static DWORD SceneDurationMs(DemoSceneId id)
     case SCENE_GLASS:    return GLASS_SCENE_MS;
     case SCENE_CHROME:   return CHROME_SCENE_MS;
     case SCENE_GALAXY:   return GALAXY_SCENE_MS;
-	case SCENE_CRYSTAL:  return CRYSTAL_SCENE_MS;
+    case SCENE_CRYSTAL:  return CRYSTAL_SCENE_MS;
     case SCENE_VURXDK:   return VURXDK_SCENE_MS;
     case SCENE_X:        return X_SCENE_MS;
     case SCENE_CUBE:     return CUBE_SCENE_MS;
@@ -502,6 +503,8 @@ void __cdecl main()
     }
 
     Sleep(1750);
+
+    BiosScreen_Run();   // mock BIOS splash (~6s), self-contained
 
     InitInput();
     Menu_Init((int)SCENE_COUNT);
