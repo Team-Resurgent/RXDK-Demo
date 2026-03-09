@@ -85,7 +85,7 @@ static void CreateSphere(float r, int segU, int segV)
     s_numVerts = (segU + 1) * (segV + 1);
     s_numIndices = segU * segV * 6;
 
-    g_pDevice->CreateVertexBuffer(s_numVerts * sizeof(Vtx), 0, FVF_VTX, D3DPOOL_MANAGED, &s_vb);
+    g_pDevice->CreateVertexBuffer(s_numVerts * sizeof(Vtx), D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY, FVF_VTX, D3DPOOL_DEFAULT, &s_vb);
     g_pDevice->CreateIndexBuffer(s_numIndices * sizeof(WORD), 0, D3DFMT_INDEX16, D3DPOOL_MANAGED, &s_ib);
 
     Vtx* v = nullptr;
