@@ -31,7 +31,7 @@ the RXDK environment.
 - CuveEnvScene - A spinning cube with environment  mapping and  with an Xbox-themed space background
 - DripScene - Interactive water ripple simulation with multi-layer shading, rain mode, and realistic physics
 - MazeScene - A cel-shaded Windows 95-like maze
-- PostFXScene - Various PostFX samples such as lenswarping, vignette, heat warping, and a few other techniques to appear as a black hole 
+- PostFXScene - A CRT signal corruption sequence: stable BIOS display progressively consumed by scanline interference, sync tears, chromatic aberration, barrel warp, and phosphor burn, collapsing to a dying horizontal line.
 - Credits - Star Wars-style scrolling credits with perspective and color-coded shoutouts
 - CityScene - Animated cityscape/skyline scene
 

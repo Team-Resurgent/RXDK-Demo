@@ -101,7 +101,7 @@ static const DWORD CUBE_SCENE_MS = 18000;
 static const DWORD CUBE_ENV_SCENE_MS = 24000;
 static const DWORD DRIP_SCENE_MS = 20000;
 static const DWORD MAZE_SCENE_MS = 25000;
-static const DWORD POSTFX_SCENE_MS = 18000;
+static const DWORD POSTFX_SCENE_MS = 15000;
 static const DWORD CITY_SCENE_MS = 15000;
 static const DWORD CREDITS_SCENE_MS = 25000;
 
